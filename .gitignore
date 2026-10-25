@@ -8,8 +8,9 @@ dist
 !.env.example
 
 # local files
-storage
-storage-test
+# local uploads only (anchored with / so source folders like src/storage stay tracked)
+/storage
+/storage-test
 *.log
 *.dump
 .DS_Store
