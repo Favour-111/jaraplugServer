@@ -1,0 +1,15 @@
+# dependencies & build output
+node_modules
+dist
+
+# secrets — never commit these (use .env.example as the template)
+.env
+.env.*
+!.env.example
+
+# local files
+storage
+storage-test
+*.log
+*.dump
+.DS_Store

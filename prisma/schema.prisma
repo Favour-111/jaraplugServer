@@ -1,0 +1,600 @@
+// JaraPlug data model.
+// Money is always stored as integer kobo (1 NGN = 100 kobo).
+// `providerId` on Booking / MediaContent / Favorite references the provider's User.id.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  UNASSIGNED
+  CLIENT
+  PROVIDER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum AgeVerificationStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationStatus {
+  UNSUBMITTED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum ProfileVisibility {
+  PUBLIC
+  MEMBERS_ONLY
+  HIDDEN
+}
+
+enum AvailabilityStatus {
+  AVAILABLE_NOW
+  BY_APPOINTMENT
+  OFFLINE
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum ContentVisibility {
+  PUBLIC
+  FREE_MEMBERS
+  PAID
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum ModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  UNDER_REVIEW
+  REMOVED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+}
+
+enum TransactionType {
+  CONTENT_PURCHASE
+  CREDIT_TOPUP
+  REFUND
+}
+
+enum CreditEntryType {
+  TOPUP
+  PURCHASE
+  REFUND
+  REFERRAL
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum PurchaseStatus {
+  COMPLETED
+  REFUNDED
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  COMPLETED
+}
+
+enum ReportCategory {
+  NON_CONSENSUAL_IMAGERY
+  UNDERAGE
+  EXPLOITATION
+  IMPERSONATION
+  HARASSMENT
+  SPAM_OR_SCAM
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
+enum VerificationType {
+  AGE
+  PROVIDER_IDENTITY
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PayoutStatus {
+  REQUESTED
+  PAID
+  REJECTED
+}
+
+enum SupportStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+model User {
+  id                    String                @id @default(cuid())
+  authProviderId        String                @unique
+  username              String?               @unique
+  displayName           String?
+  email                 String?
+  role                  Role                  @default(UNASSIGNED)
+  accountStatus         AccountStatus         @default(ACTIVE)
+  ageVerificationStatus AgeVerificationStatus @default(NOT_STARTED)
+  creditBalance         Int                   @default(0)
+  referralCode          String?               @unique
+  city                  String?
+  preferences           Json?
+  avatarKey             String?
+  termsAcceptedAt       DateTime?
+  privacyAcceptedAt     DateTime?
+  onboardedAt           DateTime?
+  lastSeenAt            DateTime?
+  suspendedReason       String?
+  isDemo                Boolean               @default(false)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  providerProfile      ProviderProfile?
+  content              MediaContent[]
+  participations       ConversationParticipant[]
+  messagesSent         Message[]
+  purchases            ContentPurchase[]
+  transactions         Transaction[]             @relation("TransactionUser")
+  creditLedger         CreditLedger[]
+  referralsMade        Referral[]                @relation("ReferrerOf")
+  referredBy           Referral?                 @relation("ReferredUser")
+  payoutAccount        PayoutAccount?
+  payoutOtps           PayoutOtp[]
+  earningsTransactions Transaction[]             @relation("TransactionPayee")
+  bookingsAsClient     Booking[]                 @relation("BookingClient")
+  bookingsAsProvider   Booking[]                 @relation("BookingProvider")
+  favorites            Favorite[]                @relation("FavoriteOwner")
+  favoritedBy          Favorite[]                @relation("FavoriteProvider")
+  reportsFiled         Report[]                  @relation("Reporter")
+  reportsAgainst       Report[]                  @relation("Reported")
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+  blocksMade           Block[]                   @relation("Blocker")
+  blocksReceived       Block[]                   @relation("Blocked")
+  availability         Availability[]
+  verificationRequests VerificationRequest[]     @relation("VerificationSubject")
+  payouts              Payout[]
+  supportRequests      SupportRequest[]
+
+  @@index([role, accountStatus])
+}
+
+model ProviderProfile {
+  id                 String             @id @default(cuid())
+  userId             String             @unique
+  biography          String             @default("")
+  city               String
+  area               String?
+  displayAge         Int?
+  categories         String[]
+  profileImage       String?
+  verificationStatus VerificationStatus @default(UNSUBMITTED)
+  visibility         ProfileVisibility  @default(HIDDEN)
+  availabilityStatus AvailabilityStatus @default(BY_APPOINTMENT)
+  // Which optional fields are shown publicly: { age: boolean, area: boolean, categories: boolean }
+  publicFields       Json               @default("{\"age\":true,\"area\":true,\"categories\":true}")
+  consentConfirmedAt DateTime?
+  submittedAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([city, visibility, verificationStatus])
+}
+
+model MediaContent {
+  id               String            @id @default(cuid())
+  providerId       String
+  title            String
+  description      String            @default("")
+  mediaType        MediaType
+  mimeType         String
+  sizeBytes        Int
+  storageKey       String
+  thumbnailKey     String?
+  visibility       ContentVisibility
+  price            Int               @default(0)
+  status           ContentStatus     @default(DRAFT)
+  moderationStatus ModerationStatus  @default(PENDING)
+  moderationNote   String?
+  consentConfirmed Boolean           @default(false)
+  durationSeconds  Int?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  provider  User              @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  purchases ContentPurchase[]
+  reports   Report[]
+
+  @@index([providerId, status, moderationStatus])
+}
+
+model Conversation {
+  id            String   @id @default(cuid())
+  // Sorted "userA:userB" — guarantees exactly one conversation per pair.
+  pairKey       String   @unique
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  conversationId String
+  userId         String
+  joinedAt       DateTime  @default(now())
+  lastReadAt     DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id              String      @id @default(cuid())
+  conversationId  String
+  senderId        String
+  messageType     MessageType @default(TEXT)
+  body            String      @default("")
+  attachmentKey   String?
+  durationSeconds Int?
+  createdAt       DateTime    @default(now())
+  deliveredAt     DateTime?
+  readAt          DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+/**
+ * One row per client who joined through someone's referral link. A person can only ever be referred once.
+ */
+model Referral {
+  id             String   @id @default(cuid())
+  referrerId     String
+  referredUserId String   @unique
+  rewardCredits  Int
+  createdAt      DateTime @default(now())
+
+  referrer     User @relation("ReferrerOf", fields: [referrerId], references: [id], onDelete: Cascade)
+  referredUser User @relation("ReferredUser", fields: [referredUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId])
+}
+
+/**
+ * Small admin-editable key/value settings (for example the referral programme switch).
+ */
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+/**
+ * Append-only record of every change to a user's in-app credit balance.
+ */
+model CreditLedger {
+  id            String          @id @default(cuid())
+  userId        String
+  type          CreditEntryType
+  delta         Int
+  balanceAfter  Int
+  transactionId String?
+  contentId     String?
+  createdAt     DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // A transaction can credit/debit/refund a wallet at most once per entry type (webhook replays, double refunds).
+  @@unique([transactionId, type])
+  @@index([userId, createdAt])
+}
+
+model Transaction {
+  id                String            @id @default(cuid())
+  userId            String
+  payeeId           String?
+  contentId         String?
+  transactionType   TransactionType
+  provider          String
+  providerReference String            @unique
+  idempotencyKey    String?           @unique
+  checkoutUrl       String?
+  amount            Int
+  currency          String            @default("NGN")
+  platformFee       Int               @default(0)
+  processingFee     Int               @default(0)
+  netAmount         Int               @default(0)
+  status            TransactionStatus @default(PENDING)
+  paidAt            DateTime?
+  refundedAt        DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user     User             @relation("TransactionUser", fields: [userId], references: [id], onDelete: Restrict)
+  payee    User?            @relation("TransactionPayee", fields: [payeeId], references: [id], onDelete: SetNull)
+  purchase ContentPurchase?
+
+  @@index([payeeId, status])
+  @@index([userId, createdAt])
+}
+
+model ContentPurchase {
+  id            String         @id @default(cuid())
+  buyerId       String
+  contentId     String
+  transactionId String         @unique
+  amount        Int
+  status        PurchaseStatus @default(COMPLETED)
+  purchasedAt   DateTime       @default(now())
+
+  buyer       User         @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  content     MediaContent @relation(fields: [contentId], references: [id], onDelete: Restrict)
+  transaction Transaction  @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  // One entitlement per buyer per item — makes entitlement creation idempotent.
+  @@unique([buyerId, contentId])
+}
+
+// Every payment-provider webhook event is recorded once; replays are no-ops.
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventId     String
+  eventType   String
+  payload     Json
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model Payout {
+  id            String       @id @default(cuid())
+  providerId    String
+  amount        Int
+  status        PayoutStatus @default(REQUESTED)
+  reference     String       @unique
+  note          String?
+  // Where to send the money, copied from the provider's payout account when the withdrawal was confirmed.
+  bankName      String?
+  accountNumber String?
+  accountName   String?
+  requestedAt   DateTime     @default(now())
+  paidAt        DateTime?
+
+  provider User @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, status])
+}
+
+/**
+ * The bank account a provider withdraws to. Paid manually by an administrator.
+ */
+model PayoutAccount {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  bankName      String
+  accountNumber String
+  accountName   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * One-time email code that must be entered to confirm a withdrawal. Only a hash of the code is stored.
+ */
+model PayoutOtp {
+  id         String    @id @default(cuid())
+  userId     String
+  amount     Int
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Booking {
+  id            String        @id @default(cuid())
+  clientId      String
+  providerId    String
+  category      String
+  requestedAt   DateTime      @default(now())
+  scheduledAt   DateTime
+  durationMins  Int           @default(60)
+  status        BookingStatus @default(PENDING)
+  message       String?
+  declineReason String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  client   User @relation("BookingClient", fields: [clientId], references: [id], onDelete: Cascade)
+  provider User @relation("BookingProvider", fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId, scheduledAt, status])
+  @@index([clientId, status])
+}
+
+model Availability {
+  id          String @id @default(cuid())
+  providerId  String
+  // 0 = Sunday … 6 = Saturday, minutes from midnight (Africa/Lagos)
+  dayOfWeek   Int
+  startMinute Int
+  endMinute   Int
+
+  provider User @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId, dayOfWeek])
+}
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  providerId String
+  createdAt  DateTime @default(now())
+
+  user     User @relation("FavoriteOwner", fields: [userId], references: [id], onDelete: Cascade)
+  provider User @relation("FavoriteProvider", fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, providerId])
+}
+
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+}
+
+model Report {
+  id                String         @id @default(cuid())
+  reporterId        String
+  reportedUserId    String?
+  reportedContentId String?
+  category          ReportCategory
+  description       String         @default("")
+  status            ReportStatus   @default(OPEN)
+  // Serious categories are flagged for priority handling.
+  priority          Boolean        @default(false)
+  resolutionNote    String?
+  createdAt         DateTime       @default(now())
+  resolvedAt        DateTime?
+
+  reporter        User          @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser    User?         @relation("Reported", fields: [reportedUserId], references: [id], onDelete: SetNull)
+  reportedContent MediaContent? @relation(fields: [reportedContentId], references: [id], onDelete: SetNull)
+
+  @@index([status, priority, createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String    @default("")
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model VerificationRequest {
+  id              String           @id @default(cuid())
+  userId          String
+  type            VerificationType
+  status          RequestStatus    @default(PENDING)
+  // Reference id at the external KYC / age-assurance provider. No ID documents are stored here.
+  providerRef     String?
+  note            String?
+  rejectionReason String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  createdAt       DateTime         @default(now())
+
+  user User @relation("VerificationSubject", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
+model SupportRequest {
+  id                   String        @id @default(cuid())
+  userId               String
+  subject              String
+  body                 String
+  relatedTransactionId String?
+  status               SupportStatus @default(OPEN)
+  adminResponse        String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  administratorId String
+  action          String
+  targetType      String
+  targetId        String
+  reason          String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  administrator User @relation(fields: [administratorId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+}
