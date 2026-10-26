@@ -23,6 +23,3 @@ export const NIGERIAN_BANKS = [
   'OPay', 'PalmPay', 'Polaris Bank', 'Providus Bank', 'Stanbic IBTC Bank', 'Standard Chartered Bank', 'Sterling Bank',
   'SunTrust Bank', 'Union Bank of Nigeria', 'United Bank for Africa (UBA)', 'Unity Bank', 'VFD Microfinance Bank', 'Wema Bank', 'Zenith Bank',
 ] as const
-export const PAYOUT_OTP_TTL_MINUTES = 10
-export const PAYOUT_OTP_MAX_ATTEMPTS = 5
-export const PAYOUT_OTP_MAX_PER_HOUR = 5

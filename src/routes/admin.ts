@@ -6,7 +6,6 @@ import { badRequest, conflict, forbidden, notFound, wrap } from '../lib/errors'
 import { me, requireAuth, requireRole } from '../auth'
 import { audit } from '../services/audit'
 import { notify } from '../services/notify'
-import { sendMailQuietly } from '../services/mailer'
 import { formatNaira } from '../lib/money'
 import { creditsToKobo, creditWallet, kobotoCredits } from '../services/credits'
 import { getReferralSettings, saveReferralSettings } from '../services/referrals'
@@ -268,15 +267,6 @@ adminRouter.post('/payouts/:id/decide', wrap(async (req, res) => {
     audit(admin.id, `PAYOUT_${body.decision.toUpperCase()}`, 'Payout', p.id, body.reason, { amount: p.amount }) as any,
   ])
   await notify(p.providerId, 'PAYOUT', body.decision === 'paid' ? 'Payout sent' : 'Payout rejected', body.reason, '/provider/earnings')
-  const owner = await prisma.user.findUnique({ where: { id: p.providerId }, select: { email: true } })
-  if (owner?.email && !/\.invalid$/i.test(owner.email))
-    void sendMailQuietly({
-      to: owner.email,
-      subject: body.decision === 'paid' ? 'Your JaraPlug payout has been sent' : 'Your JaraPlug withdrawal was not processed',
-      text: body.decision === 'paid'
-        ? `We have sent ${formatNaira(p.amount)} to ${p.bankName ?? 'your bank account'}. It should reflect in your account shortly.\n\nReference: ${p.reference}`
-        : `Your withdrawal of ${formatNaira(p.amount)} was not processed.\n\nReason: ${body.reason}\n\nThe amount is back in your payable balance. Reference: ${p.reference}`,
-    })
   res.json({ ok: true })
 }))
 

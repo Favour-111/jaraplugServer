@@ -34,14 +34,6 @@ const schema = z.object({
   MAX_VIDEO_MB: z.coerce.number().default(500),
 
   PAYSTACK_SECRET_KEY: z.string().optional(),
-  // Outgoing email (withdrawal codes, admin alerts). For Gmail: smtp.gmail.com, port 465, and an App Password.
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().default(465),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  MAIL_FROM: z.string().optional(),
-  // Every withdrawal request is emailed here so the admin can pay it out manually.
-  ADMIN_NOTIFY_EMAIL: z.string().email().default('jaraplugsupport@gmail.com'),
   // One in-app credit costs this many kobo (10_000 = ₦100). Content prices must be whole multiples of it.
   CREDIT_PRICE_KOBO: z.coerce.number().int().positive().default(10_000),
   PLATFORM_COMMISSION_BPS: z.coerce.number().int().min(0).max(10000).default(2000),
@@ -64,7 +56,6 @@ export const env = parsed.data
 // ---- Production safety rails ----
 if (env.NODE_ENV === 'production') {
   const problems: string[] = []
-  if (!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS)) problems.push('SMTP_HOST, SMTP_USER and SMTP_PASS are required in production (withdrawal codes are sent by email).')
   if (env.DEMO_AUTO_VERIFY) problems.push('DEMO_AUTO_VERIFY=true disables age verification and must be removed in production.')
   if (env.AUTH_MODE !== 'clerk') problems.push('AUTH_MODE must be "clerk" in production (dev auth is insecure).')
   if (!env.CLERK_SECRET_KEY) problems.push('CLERK_SECRET_KEY is required in production.')

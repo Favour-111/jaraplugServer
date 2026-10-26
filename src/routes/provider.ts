@@ -3,13 +3,12 @@ import { z } from 'zod'
 import crypto from 'node:crypto'
 import { prisma } from '../db'
 import { env } from '../env'
-import { CITIES, NIGERIAN_BANKS, PAYOUT_OTP_MAX_ATTEMPTS, PAYOUT_OTP_MAX_PER_HOUR, PAYOUT_OTP_TTL_MINUTES } from '../config/constants'
-import { badRequest, conflict, forbidden, HttpError, wrap } from '../lib/errors'
+import { CITIES, NIGERIAN_BANKS } from '../config/constants'
+import { badRequest, conflict, forbidden, wrap } from '../lib/errors'
 import { me, requireAuth, requireRole } from '../auth'
 import { imageUpload, processImage, rm, validateUpload } from '../lib/upload'
 import { storage } from '../storage'
 import { notify, notifyAdmins } from '../services/notify'
-import { sendMail, sendMailQuietly } from '../services/mailer'
 import { formatNaira } from '../lib/money'
 
 export const providerRouter = Router()
@@ -177,10 +176,8 @@ providerRouter.get('/earnings', wrap(async (req, res) => {
   })
 }))
 
-// ─── Payout account + email-confirmed withdrawals (paid manually by an administrator) ───
+// ─── Payout account + withdrawals (paid manually by an administrator) ───
 const maskAccount = (n: string) => `••••••${n.slice(-4)}`
-const maskEmail = (e: string) => e.replace(/^(.).*(@.*)$/, (_m, a, b) => `${a}***${b}`)
-const otpHash = (id: string, code: string) => crypto.createHmac('sha256', env.MEDIA_SIGNING_SECRET).update(`${id}:${code}`).digest('hex')
 
 async function requireVerifiedProvider(userId: string) {
   const profile = await prisma.providerProfile.findUniqueOrThrow({ where: { userId } })
@@ -213,75 +210,26 @@ providerRouter.put('/payout-account', wrap(async (req, res) => {
   res.json({ ok: true, account: { bankName: body.bankName, accountName: body.accountName, accountNumberMasked: maskAccount(body.accountNumber) } })
 }))
 
-/** Step 1: ask to withdraw. We email a one-time code; nothing is reserved until the code is confirmed. */
-providerRouter.post('/payouts/request', wrap(async (req, res) => {
+/**
+ * Withdraw earnings. Creates a payout request with a snapshot of the bank details and alerts the admins, who send the
+ * money by bank transfer and mark it paid. The balance is re-checked under a lock so concurrent requests cannot over-draw it.
+ */
+providerRouter.post('/payouts', wrap(async (req, res) => {
   const u = me(req)
   const { amount } = z.object({ amount: z.number().int().positive() }).parse(req.body)
   await requireVerifiedProvider(u.id)
   if (amount < env.MIN_PAYOUT_KOBO) throw badRequest(`The minimum withdrawal is ${formatNaira(env.MIN_PAYOUT_KOBO)}`, 'BELOW_MINIMUM')
   const account = await prisma.payoutAccount.findUnique({ where: { userId: u.id } })
   if (!account) throw badRequest('Add your bank account before withdrawing', 'NO_PAYOUT_ACCOUNT')
-  if (!u.email || /\.invalid$/i.test(u.email)) throw badRequest('Your account has no email address to send the confirmation code to', 'EMAIL_REQUIRED')
-  if (amount > (await availableToWithdraw(prisma, u.id))) throw conflict('Amount exceeds your payable balance', 'INSUFFICIENT_BALANCE')
-  const recent = await prisma.payoutOtp.count({ where: { userId: u.id, createdAt: { gt: new Date(Date.now() - 3600_000) } } })
-  if (recent >= PAYOUT_OTP_MAX_PER_HOUR) throw new HttpError(429, 'Too many code requests. Please try again later.', 'RATE_LIMITED')
-
-  await prisma.payoutOtp.deleteMany({ where: { userId: u.id, consumedAt: null } })
-  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0')
-  const otp = await prisma.payoutOtp.create({ data: { userId: u.id, amount, codeHash: '', expiresAt: new Date(Date.now() + PAYOUT_OTP_TTL_MINUTES * 60_000) } })
-  await prisma.payoutOtp.update({ where: { id: otp.id }, data: { codeHash: otpHash(otp.id, code) } })
-  try {
-    await sendMail({
-      to: u.email,
-      subject: `Your JaraPlug withdrawal code: ${code}`,
-      text: `Use this code to confirm your withdrawal of ${formatNaira(amount)} to ${account.bankName} ${maskAccount(account.accountNumber)}:\n\n    ${code}\n\nIt expires in ${PAYOUT_OTP_TTL_MINUTES} minutes. If you did not ask for this, ignore this email and do not share the code with anyone.`,
-    })
-  } catch (e) {
-    await prisma.payoutOtp.delete({ where: { id: otp.id } }).catch(() => {})
-    console.error('Withdrawal code email failed:', e)
-    throw new HttpError(503, 'We could not send the confirmation email. Please try again shortly.', 'EMAIL_FAILED')
-  }
-  res.status(201).json({ otpId: otp.id, sentTo: maskEmail(u.email), expiresAt: otp.expiresAt })
-}))
-
-/** Step 2: confirm with the emailed code. This creates the withdrawal and alerts the admin. */
-providerRouter.post('/payouts/confirm', wrap(async (req, res) => {
-  const u = me(req)
-  const { otpId, code } = z.object({ otpId: z.string().min(1), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).parse(req.body)
-  await requireVerifiedProvider(u.id)
-  const otp = await prisma.payoutOtp.findFirst({ where: { id: otpId, userId: u.id, consumedAt: null } })
-  if (!otp || otp.expiresAt < new Date()) throw badRequest('This code has expired. Please request a new one.', 'CODE_EXPIRED')
-  if (otp.attempts >= PAYOUT_OTP_MAX_ATTEMPTS) throw new HttpError(429, 'Too many wrong attempts. Please request a new code.', 'TOO_MANY_ATTEMPTS')
-  const given = Buffer.from(otpHash(otp.id, code))
-  const real = Buffer.from(otp.codeHash)
-  if (given.length !== real.length || !crypto.timingSafeEqual(given, real)) {
-    await prisma.payoutOtp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } })
-    throw badRequest(`That code is not correct. ${Math.max(0, PAYOUT_OTP_MAX_ATTEMPTS - otp.attempts - 1)} attempts left.`, 'BAD_CODE')
-  }
-  const account = await prisma.payoutAccount.findUnique({ where: { userId: u.id } })
-  if (!account) throw badRequest('Add your bank account before withdrawing', 'NO_PAYOUT_ACCOUNT')
 
   const payout = await prisma.$transaction(async (db) => {
     await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'payout:' + u.id}))`
-    // The code can be used exactly once; claim it first, then re-check the balance under the lock.
-    const claimed = await db.payoutOtp.updateMany({ where: { id: otp.id, consumedAt: null }, data: { consumedAt: new Date() } })
-    if (claimed.count !== 1) throw badRequest('This code has already been used.', 'CODE_EXPIRED')
-    if (otp.amount > (await availableToWithdraw(db, u.id))) throw conflict('Amount exceeds your payable balance', 'INSUFFICIENT_BALANCE')
+    if (amount > (await availableToWithdraw(db, u.id))) throw conflict('Amount exceeds your payable balance', 'INSUFFICIENT_BALANCE')
     return db.payout.create({
-      data: { providerId: u.id, amount: otp.amount, reference: `po_${crypto.randomBytes(8).toString('hex')}`, bankName: account.bankName, accountNumber: account.accountNumber, accountName: account.accountName },
+      data: { providerId: u.id, amount, reference: `po_${crypto.randomBytes(8).toString('hex')}`, bankName: account.bankName, accountNumber: account.accountNumber, accountName: account.accountName },
     })
   })
 
   await notifyAdmins('PAYOUT_REQUESTED', 'Withdrawal to pay', `@${u.username} · ${formatNaira(payout.amount)} · ${account.bankName} ${account.accountNumber}`, '/admin/transactions')
-  void sendMailQuietly({
-    to: env.ADMIN_NOTIFY_EMAIL,
-    subject: `Withdrawal to pay: ${formatNaira(payout.amount)} — @${u.username}`,
-    text: `A provider confirmed a withdrawal. Please send the money, then mark it as paid in the admin dashboard.\n\nProvider:       @${u.username} (${u.email})\nAmount:         ${formatNaira(payout.amount)}\nBank:           ${account.bankName}\nAccount number: ${account.accountNumber}\nAccount name:   ${account.accountName}\nReference:      ${payout.reference}\n\nAdmin dashboard → Transactions → Payout requests.`,
-  })
-  if (u.email) void sendMailQuietly({
-    to: u.email,
-    subject: 'Your JaraPlug withdrawal is on its way',
-    text: `We received your withdrawal of ${formatNaira(payout.amount)} to ${account.bankName} ${maskAccount(account.accountNumber)}.\n\nThe money will reach your account within 24 hours.\n\nReference: ${payout.reference}`,
-  })
   res.status(201).json({ id: payout.id, reference: payout.reference, amount: payout.amount, status: payout.status, arrivesWithinHours: 24 })
 }))

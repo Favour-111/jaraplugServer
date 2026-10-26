@@ -185,9 +185,9 @@ describe('refunds, earnings & payouts', () => {
     const { provider } = await paid()
     await prisma.payoutAccount.create({ data: { userId: provider.id, bankName: 'Zenith Bank', accountNumber: '0123456789', accountName: 'Amara Test' } })
     await api().put('/api/provider/earnings').set(auth(provider)).send({ netEarnings: 999999 }).expect(404)
-    const r = await api().post('/api/provider/payouts/request').set(auth(provider)).send({ amount: 400_000 }).expect(409) // still inside the hold window
+    const r = await api().post('/api/provider/payouts').set(auth(provider)).send({ amount: 400_000 }).expect(409) // still inside the hold window
     expect(r.body.code).toBe('INSUFFICIENT_BALANCE')
-    await api().post('/api/provider/payouts/request').set(auth(provider)).send({ amount: 100 }).expect(400)
+    await api().post('/api/provider/payouts').set(auth(provider)).send({ amount: 100 }).expect(400)
   })
   it('lets an admin refund a purchase, which revokes access, returns the credits and removes the amount from earnings', async () => {
     const { provider, buyer, item, co } = await paid()
