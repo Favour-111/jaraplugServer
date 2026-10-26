@@ -96,3 +96,19 @@ class S3Storage implements Storage {
 export const storage: Storage = env.STORAGE_DRIVER === 's3' ? new S3Storage() : new LocalStorage()
 
 export const uploadTmpDir = () => path.resolve(process.cwd(), env.LOCAL_STORAGE_DIR, 'tmp')
+
+/** Startup sanity check for the S3 settings: says plainly what to fix instead of failing later with a 500 on upload. */
+export async function checkStorageConfig() {
+  if (env.STORAGE_DRIVER !== 's3') return
+  try {
+    if (env.S3_ENDPOINT) console.warn(`⚠  S3_ENDPOINT is set (${env.S3_ENDPOINT}). For AWS S3 leave it empty; a wrong endpoint causes PermanentRedirect errors.`)
+    // Any request to a bucket answers with its real region in a header, even when access is denied.
+    const res = await fetch(`https://${env.S3_BUCKET}.s3.amazonaws.com`, { method: 'HEAD', signal: AbortSignal.timeout(8000) })
+    const real = res.headers.get('x-amz-bucket-region')
+    if (!real) console.warn(`⚠  S3 bucket "${env.S3_BUCKET}" was not found (HTTP ${res.status}). Check S3_BUCKET for typos or spaces.`)
+    else if (real !== env.S3_REGION) console.warn(`⚠  S3_REGION is "${env.S3_REGION}" but bucket "${env.S3_BUCKET}" is in "${real}". Set S3_REGION=${real} or uploads will fail.`)
+    else console.log(`✔ S3 bucket "${env.S3_BUCKET}" found in ${real}`)
+  } catch (e) {
+    console.warn('⚠  Could not check the S3 bucket:', e instanceof Error ? e.message : e)
+  }
+}
