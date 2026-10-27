@@ -11,6 +11,7 @@ import { creditsToKobo, creditWallet, kobotoCredits } from '../services/credits'
 import { getReferralSettings, saveReferralSettings } from '../services/referrals'
 import { serializeContent } from '../services/content'
 import { toUserSummary } from '../lib/serializers'
+import { visitorStats } from '../services/analytics'
 
 export const adminRouter = Router()
 adminRouter.use(requireAuth, requireRole('ADMIN'))
@@ -33,6 +34,10 @@ adminRouter.get('/overview', wrap(async (_req, res) => {
     users, providers, pendingVerifications, openReports, priorityReports, pendingContent, openSupport: support, pendingPayouts: payouts,
     transactions: { count: tx._count, gross: tx._sum.amount ?? 0, platformRevenue: tx._sum.platformFee ?? 0 },
   })
+}))
+
+adminRouter.get('/visitors', wrap(async (_req, res) => {
+  res.json(await visitorStats(30))
 }))
 
 // ─── Users ───

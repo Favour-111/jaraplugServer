@@ -12,11 +12,18 @@ import { toProviderCard } from '../lib/serializers'
 import { blockedIdsFor, isBlockedEitherWay } from '../services/blocks'
 import { serializeContent } from '../services/content'
 import { forbidden } from '../lib/errors'
+import { recordVisit } from '../services/analytics'
 
 
 export const publicRouter = Router()
 
 publicRouter.get('/health', (_req, res) => res.json({ ok: true }))
+
+// Anonymous page-view counter (no cookies, no stored IPs). Always 204 so the client never has to care.
+publicRouter.post('/track', wrap(async (req, res) => {
+  await recordVisit(req)
+  res.status(204).end()
+}))
 
 publicRouter.get('/config', (_req, res) => {
   res.json({

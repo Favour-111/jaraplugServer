@@ -316,6 +316,20 @@ model Referral {
 }
 
 /**
+ * One row per anonymous visitor per day (Lagos time), used for the admin visitor counts.
+ * `visitorHash` is a salted hash of IP + browser that changes every day, so nobody can be followed across days
+ * and no IP address or cookie is stored.
+ */
+model DailyVisitor {
+  day         String // YYYY-MM-DD, Lagos time
+  visitorHash String
+  views       Int      @default(1)
+  createdAt   DateTime @default(now())
+
+  @@id([day, visitorHash])
+}
+
+/**
  * Small admin-editable key/value settings (for example the referral programme switch).
  */
 model Setting {

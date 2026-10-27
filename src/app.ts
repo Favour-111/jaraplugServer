@@ -33,6 +33,7 @@ export function createApp() {
   app.use(express.json({ limit: '64kb' }))
   app.use('/api', limit(15 * 60_000, 1500))
   app.use('/api/reports', limit(60 * 60_000, 20))
+  app.use('/api/track', limit(60_000, 60))
   app.use('/api/purchases/checkout', limit(60_000, 20))
   app.use('/api/dev', limit(60_000, 30))
 
