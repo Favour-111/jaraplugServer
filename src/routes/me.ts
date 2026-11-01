@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { applyReferral } from '../services/referrals'
 import { env } from '../env'
-import { CITIES } from '../config/constants'
+import { cityField } from '../config/constants'
 import { badRequest, conflict, forbidden, wrap } from '../lib/errors'
 import { me, requireAuth } from '../auth'
 import { toSelf } from '../lib/serializers'
@@ -44,7 +44,7 @@ const onboardingSchema = z.discriminatedUnion('role', [
     role: z.literal('CLIENT'),
     username,
     displayName: z.string().trim().min(2).max(40).optional(),
-    city: z.enum(CITIES),
+    city: cityField,
     acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
     referralCode: z.string().max(20).optional(),
   }),
@@ -52,7 +52,7 @@ const onboardingSchema = z.discriminatedUnion('role', [
     role: z.literal('PROVIDER'),
     username,
     displayName: z.string().trim().min(2).max(40),
-    city: z.enum(CITIES),
+    city: cityField,
     acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
   }),
 ])
@@ -93,7 +93,7 @@ meRouter.patch('/', wrap(async (req, res) => {
   const u = me(req)
   const body = z.object({
     displayName: z.string().trim().min(2).max(40).optional(),
-    city: z.enum(CITIES).optional(),
+    city: cityField.optional(),
   }).parse(req.body)
   const updated = await prisma.user.update({ where: { id: u.id }, data: body })
   res.json(toSelf(updated))

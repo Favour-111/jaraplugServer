@@ -3,7 +3,7 @@ import { z } from 'zod'
 import crypto from 'node:crypto'
 import { prisma } from '../db'
 import { env } from '../env'
-import { CITIES, NIGERIAN_BANKS } from '../config/constants'
+import { cityField, NIGERIAN_BANKS } from '../config/constants'
 import { badRequest, conflict, forbidden, wrap } from '../lib/errors'
 import { me, requireAuth, requireRole } from '../auth'
 import { imageUpload, processImage, rm, validateUpload } from '../lib/upload'
@@ -31,7 +31,7 @@ providerRouter.get('/profile', wrap(async (req, res) => res.json(await profileOu
 const profileSchema = z.object({
   displayName: z.string().trim().min(2).max(40).optional(),
   biography: z.string().trim().max(1000).optional(),
-  city: z.enum(CITIES).optional(),
+  city: cityField.optional(),
   area: z.string().trim().max(60).nullable().optional(),
   displayAge: z.number().int().min(18, 'Providers must be 18 or older').max(99).nullable().optional(),
   visibility: z.enum(['PUBLIC', 'MEMBERS_ONLY', 'HIDDEN']).optional(),

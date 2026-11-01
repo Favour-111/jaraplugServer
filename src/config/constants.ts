@@ -1,4 +1,11 @@
-export const CITIES = ['Lagos', 'Abuja', 'Port Harcourt', 'Ibadan', 'Enugu', 'Benin City'] as const
+import { z } from 'zod'
+
+/** Autocomplete suggestions only: users can enter any city in the world. */
+export const CITY_SUGGESTIONS = [
+  'Lagos', 'Abuja', 'Port Harcourt', 'Ibadan', 'Enugu', 'Benin City', 'Accra', 'Nairobi', 'Johannesburg', 'Cape Town',
+  'London', 'Manchester', 'Dubai', 'New York', 'Houston', 'Atlanta', 'Toronto', 'Paris', 'Berlin', 'Amsterdam',
+] as const
+export const cityField = z.string().trim().min(2, 'Enter your city').max(60)
 
 export const BOOKING_LEAD_HOURS = 2
 export const BOOKING_MAX_DAYS_AHEAD = 60

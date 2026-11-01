@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import { env } from '../env'
-import { CITIES, BOOKING_LEAD_HOURS, BOOKING_MAX_DAYS_AHEAD, LAGOS_OFFSET, BOOKING_DURATION_MINS, MAX_PAID_PRICE_KOBO, MIN_PAID_PRICE_KOBO } from '../config/constants'
+import { CITY_SUGGESTIONS, BOOKING_LEAD_HOURS, BOOKING_MAX_DAYS_AHEAD, LAGOS_OFFSET, BOOKING_DURATION_MINS, MAX_PAID_PRICE_KOBO, MIN_PAID_PRICE_KOBO } from '../config/constants'
 import { notFound, wrap } from '../lib/errors'
 import { resolveLocalPath, verifyMediaToken } from '../storage'
 import { optionalAuth, signDevToken } from '../auth'
@@ -30,7 +30,7 @@ publicRouter.get('/config', (_req, res) => {
   res.json({
     authMode: env.AUTH_MODE,
     demoAutoVerify: env.DEMO_AUTO_VERIFY,
-    cities: CITIES,
+    cities: CITY_SUGGESTIONS,
     maxImageMb: env.MAX_IMAGE_MB,
     maxVideoMb: env.MAX_VIDEO_MB,
     minPaidPriceKobo: MIN_PAID_PRICE_KOBO,
@@ -83,7 +83,7 @@ if (env.AUTH_MODE === 'dev' && env.NODE_ENV !== 'production') {
 // ───────────── Discovery ─────────────
 const discoverQuery = z.object({
   q: z.string().trim().max(80).optional(),
-  city: z.string().max(40).optional(),
+  city: z.string().trim().max(60).optional(),
   availability: z.enum(['AVAILABLE_NOW', 'BY_APPOINTMENT']).optional(),
   newOnly: z.enum(['true', 'false']).optional(),
   online: z.enum(['true', 'false']).optional(),
@@ -101,7 +101,7 @@ publicRouter.get('/providers', optionalAuth, wrap(async (req, res) => {
     profileImage: { not: null }, // never list a profile without a photo
     // Anonymous viewers only see PUBLIC profiles; verified signed-in adults also see MEMBERS_ONLY.
     visibility: viewer && (viewer.ageVerificationStatus === 'VERIFIED' || viewer.role === 'ADMIN') ? { in: ['PUBLIC', 'MEMBERS_ONLY'] } : 'PUBLIC',
-    ...(q.city ? { city: q.city } : {}),
+    ...(q.city ? { city: { equals: q.city, mode: 'insensitive' as const } } : {}),
     ...(q.availability ? { availabilityStatus: q.availability } : {}),
   }
   const where: Prisma.UserWhereInput = {
