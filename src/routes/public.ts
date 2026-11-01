@@ -13,6 +13,7 @@ import { blockedIdsFor, isBlockedEitherWay } from '../services/blocks'
 import { serializeContent } from '../services/content'
 import { forbidden } from '../lib/errors'
 import { recordVisit } from '../services/analytics'
+import { isSearchIndexable } from '../services/seo'
 
 
 export const publicRouter = Router()
@@ -173,6 +174,8 @@ publicRouter.get('/providers/:username', optionalAuth, wrap(async (req, res) => 
     biography: profile.biography,
     content,
     isSelf: isOwner,
+    // Tells the web app whether to emit `index` + a canonical URL or `noindex` for this profile page.
+    indexable: isSearchIndexable(user, profile),
   })
 }))
 

@@ -20,7 +20,7 @@ const profileOut = async (userId: string) => {
   return {
     username: u.username, displayName: u.displayName, biography: p.biography, city: p.city, area: p.area, displayAge: p.displayAge,
     visibility: p.visibility, availabilityStatus: p.availabilityStatus,
-    publicFields: p.publicFields, verificationStatus: p.verificationStatus, submittedAt: p.submittedAt,
+    publicFields: p.publicFields, searchIndexingEnabled: p.searchIndexingEnabled, verificationStatus: p.verificationStatus, submittedAt: p.submittedAt,
     consentConfirmed: !!p.consentConfirmedAt,
     profileImageUrl: p.profileImage ? await storage.signedUrl(p.profileImage, 3600) : null,
   }
@@ -37,6 +37,7 @@ const profileSchema = z.object({
   visibility: z.enum(['PUBLIC', 'MEMBERS_ONLY', 'HIDDEN']).optional(),
   availabilityStatus: z.enum(['AVAILABLE_NOW', 'BY_APPOINTMENT', 'OFFLINE']).optional(),
   publicFields: z.object({ age: z.boolean(), area: z.boolean() }).optional(),
+  searchIndexingEnabled: z.boolean().optional(),
   consentConfirmed: z.boolean().optional(),
 })
 

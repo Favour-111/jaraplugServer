@@ -4,9 +4,10 @@ import crypto from 'node:crypto'
 import { prisma } from '../db'
 import { badRequest, forbidden, notFound, wrap } from '../lib/errors'
 import { me, requireAuth, requireVerifiedAdult } from '../auth'
-import { assertMember, getOrCreateConversation, markConversationRead, sendMessage, serializeMessage } from '../services/messaging'
+import { assertMember, claimViewOnce, getOrCreateConversation, markConversationRead, sendMessage, serializeMessage } from '../services/messaging'
 import { toUserSummary } from '../lib/serializers'
-import { imageUpload, processImage, rm, validateUpload, validateVoiceNote, voiceUpload, VOICE_NOTE_MAX_SECONDS } from '../lib/upload'
+import { contentUpload, processImage, rm, validateUpload, validateVoiceNote, voiceUpload, VOICE_NOTE_MAX_SECONDS } from '../lib/upload'
+import { probeVideo } from '../lib/video'
 import { storage } from '../storage'
 import { blockedIdsFor } from '../services/blocks'
 
@@ -42,7 +43,7 @@ messagesRouter.get('/', wrap(async (req, res) => {
           id: c.id,
           other: await toUserSummary(other),
           blocked: blocked.has(other.id),
-          lastMessage: last ? { body: last.messageType === 'IMAGE' ? '📷 Photo' : last.messageType === 'AUDIO' ? '🎤 Voice message' : last.body, createdAt: last.createdAt, fromMe: last.senderId === u.id } : null,
+          lastMessage: last ? { body: last.viewOnce ? (last.messageType === 'VIDEO' ? '🔒 View once video' : '🔒 View once photo') : last.messageType === 'IMAGE' ? '📷 Photo' : last.messageType === 'VIDEO' ? '🎥 Video' : last.messageType === 'AUDIO' ? '🎤 Voice message' : last.body, createdAt: last.createdAt, fromMe: last.senderId === u.id } : null,
           unread: unreadMap.get(c.id) ?? 0,
           lastMessageAt: c.lastMessageAt,
         }
@@ -94,20 +95,40 @@ messagesRouter.post('/:id/messages', wrap(async (req, res) => {
   res.status(201).json(await sendMessage({ senderId: u.id, conversationId: String(req.params.id), body }))
 }))
 
-messagesRouter.post('/:id/attachments', imageUpload.single('file'), wrap(async (req, res) => {
+const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+const CHAT_VIDEO_MAX_BYTES = 25 * 1024 * 1024
+
+/** Photo or video in a chat. Send `viewOnce=true` to make it openable by the recipient exactly once. */
+messagesRouter.post('/:id/attachments', contentUpload.single('file'), wrap(async (req, res) => {
   const u = me(req)
   const id = String(req.params.id)
   try {
     await assertMember(u.id, id)
-    await validateUpload(req.file, ['IMAGE'])
-    if (req.file!.size > 5 * 1024 * 1024) throw badRequest('Chat images must be under 5MB', 'FILE_TOO_LARGE')
-    const { main } = await processImage(req.file!.path, { maxWidth: 1280 })
-    const key = `messages/${id}/${crypto.randomUUID()}.jpg`
-    await storage.putBuffer(key, main, 'image/jpeg')
-    res.status(201).json(await sendMessage({ senderId: u.id, conversationId: id, attachmentKey: key, body: String(req.body?.caption ?? '').slice(0, 500) }))
+    const sniffed = await validateUpload(req.file, ['IMAGE', 'VIDEO'])
+    const viewOnce = ['true', '1', 'on'].includes(String(req.body?.viewOnce ?? '').toLowerCase())
+    const caption = String(req.body?.caption ?? '').slice(0, 500)
+    if (sniffed.kind === 'IMAGE') {
+      if (req.file!.size > CHAT_IMAGE_MAX_BYTES) throw badRequest('Chat images must be under 5MB', 'FILE_TOO_LARGE')
+      const { main } = await processImage(req.file!.path, { maxWidth: 1280 })
+      const key = `messages/${id}/${crypto.randomUUID()}.jpg`
+      await storage.putBuffer(key, main, 'image/jpeg')
+      res.status(201).json(await sendMessage({ senderId: u.id, conversationId: id, attachmentKey: key, body: caption, viewOnce }))
+    } else {
+      if (req.file!.size > CHAT_VIDEO_MAX_BYTES) throw badRequest('Chat videos must be under 25MB', 'FILE_TOO_LARGE')
+      const probe = await probeVideo(req.file!.path).catch(() => ({ poster: null, durationSeconds: null }))
+      const key = `messages/${id}/${crypto.randomUUID()}.${sniffed.ext}`
+      await storage.putFile(key, req.file!.path, sniffed.mime)
+      res.status(201).json(await sendMessage({ senderId: u.id, conversationId: id, attachmentKey: key, messageType: 'VIDEO', durationSeconds: probe.durationSeconds ? Math.round(probe.durationSeconds) : undefined, body: caption, viewOnce }))
+    }
   } finally {
     await rm(req.file?.path)
   }
+}))
+
+/** Recipient opens a view-once item. Returns a short-lived link once; every later call is 410 Gone. */
+messagesRouter.post('/:id/messages/:messageId/view', wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  res.json(await claimViewOnce(me(req).id, String(req.params.id), String(req.params.messageId)))
 }))
 
 messagesRouter.post('/:id/voice', voiceUpload.single('file'), wrap(async (req, res) => {

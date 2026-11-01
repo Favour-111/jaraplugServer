@@ -14,6 +14,8 @@ const schema = z.object({
   PORT: z.coerce.number().default(4000),
   API_BASE_URL: z.string().url().default('http://localhost:4000'),
   CLIENT_ORIGINS: z.string().default('http://localhost:5173'),
+  // Canonical public URL of the web app (used for sitemap <loc> entries)
+  SITE_URL: z.string().url().default('https://www.jara-plug.com'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
   AUTH_MODE: z.enum(['clerk', 'dev']).default('dev'),

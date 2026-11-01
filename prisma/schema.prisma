@@ -78,6 +78,7 @@ enum MessageType {
   TEXT
   IMAGE
   AUDIO
+  VIDEO
 }
 
 enum TransactionType {
@@ -206,23 +207,25 @@ model User {
 }
 
 model ProviderProfile {
-  id                 String             @id @default(cuid())
-  userId             String             @unique
-  biography          String             @default("")
-  city               String
-  area               String?
-  displayAge         Int?
-  categories         String[]
-  profileImage       String?
-  verificationStatus VerificationStatus @default(UNSUBMITTED)
-  visibility         ProfileVisibility  @default(HIDDEN)
-  availabilityStatus AvailabilityStatus @default(BY_APPOINTMENT)
+  id                    String             @id @default(cuid())
+  userId                String             @unique
+  biography             String             @default("")
+  city                  String
+  area                  String?
+  displayAge            Int?
+  categories            String[]
+  profileImage          String?
+  verificationStatus    VerificationStatus @default(UNSUBMITTED)
+  visibility            ProfileVisibility  @default(HIDDEN)
+  availabilityStatus    AvailabilityStatus @default(BY_APPOINTMENT)
   // Which optional fields are shown publicly: { age: boolean, area: boolean, categories: boolean }
-  publicFields       Json               @default("{\"age\":true,\"area\":true,\"categories\":true}")
-  consentConfirmedAt DateTime?
-  submittedAt        DateTime?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  publicFields          Json               @default("{\"age\":true,\"area\":true,\"categories\":true}")
+  /// "Allow search engines to discover my profile". Opt-in: off unless the provider turns it on.
+  searchIndexingEnabled Boolean            @default(false)
+  consentConfirmedAt    DateTime?
+  submittedAt           DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -289,6 +292,9 @@ model Message {
   body            String      @default("")
   attachmentKey   String?
   durationSeconds Int?
+  /// Photo/video that the recipient can open exactly once. The file is deleted shortly after it is opened.
+  viewOnce        Boolean     @default(false)
+  viewedAt        DateTime?
   createdAt       DateTime    @default(now())
   deliveredAt     DateTime?
   readAt          DateTime?

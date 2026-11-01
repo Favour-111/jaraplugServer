@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit'
 import { clientOrigins, env } from './env'
 import { errorHandler } from './lib/errors'
 import { publicRouter } from './routes/public'
+import { seoRouter } from './routes/seo'
 import { meRouter } from './routes/me'
 import { providerRouter } from './routes/provider'
 import { contentRouter } from './routes/content'
@@ -36,6 +37,10 @@ export function createApp() {
   app.use('/api/track', limit(60_000, 60))
   app.use('/api/purchases/checkout', limit(60_000, 20))
   app.use('/api/dev', limit(60_000, 30))
+
+  app.use('/api', seoRouter)
+  // Raw API responses (JSON, signed media) must never show up in search results. Mounted after the sitemap route.
+  app.use('/api', (_req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next() })
 
   app.use('/api', publicRouter)
   app.use('/api/me', meRouter)

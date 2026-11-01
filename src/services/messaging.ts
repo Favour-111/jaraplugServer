@@ -5,6 +5,9 @@ import { emitToUser, isOnline } from './realtime'
 import { isBlockedEitherWay } from './blocks'
 import { storage } from '../storage'
 
+/** How long the link handed out when a view-once item is opened stays valid. */
+export const VIEW_ONCE_URL_TTL_SECONDS = 120
+
 const pairKeyOf = (a: string, b: string) => [a, b].sort().join(':')
 
 /** Sliding-window per-user limiter for chat messages (30 / minute). */
@@ -41,14 +44,19 @@ export async function getOrCreateConversation(userId: string, otherId: string) {
 export async function serializeMessage(m: {
   id: string; conversationId: string; senderId: string; messageType: string; body: string
   attachmentKey: string | null; durationSeconds?: number | null; createdAt: Date; deliveredAt: Date | null; readAt: Date | null
+  viewOnce?: boolean; viewedAt?: Date | null
 }) {
+  const viewOnce = !!m.viewOnce
   return {
     id: m.id,
     conversationId: m.conversationId,
     senderId: m.senderId,
     messageType: m.messageType,
     body: m.body,
-    attachmentUrl: m.attachmentKey ? await storage.signedUrl(m.attachmentKey, 3600) : null,
+    // View-once media never gets a link here, for either person: the only way to a link is claimViewOnce(), which works once.
+    attachmentUrl: m.attachmentKey && !viewOnce ? await storage.signedUrl(m.attachmentKey, 3600) : null,
+    viewOnce,
+    viewedAt: viewOnce ? (m.viewedAt ?? null) : null,
     durationSeconds: m.durationSeconds ?? null,
     createdAt: m.createdAt,
     deliveredAt: m.deliveredAt,
@@ -57,7 +65,7 @@ export async function serializeMessage(m: {
 }
 
 export async function sendMessage(input: {
-  senderId: string; conversationId: string; body?: string; attachmentKey?: string; messageType?: 'IMAGE' | 'AUDIO'; durationSeconds?: number
+  senderId: string; conversationId: string; body?: string; attachmentKey?: string; messageType?: 'IMAGE' | 'AUDIO' | 'VIDEO'; durationSeconds?: number; viewOnce?: boolean
 }) {
   const body = (input.body ?? '').trim()
   const hasAttachment = !!input.attachmentKey
@@ -87,7 +95,8 @@ export async function sendMessage(input: {
         messageType: type,
         body,
         attachmentKey: input.attachmentKey,
-        durationSeconds: type === 'AUDIO' ? input.durationSeconds : undefined,
+        durationSeconds: type === 'AUDIO' || type === 'VIDEO' ? input.durationSeconds : undefined,
+        viewOnce: hasAttachment && (type === 'IMAGE' || type === 'VIDEO') && !!input.viewOnce,
         deliveredAt: delivered,
       },
     }),
@@ -112,4 +121,47 @@ export async function markConversationRead(userId: string, conversationId: strin
   })
   if (res.count > 0) emitToUser(otherId, 'message:status', { conversationId, status: 'read', readAt: now })
   return res.count
+}
+
+/**
+ * Opens a view-once photo/video for the recipient. Works exactly once: the claim is a single atomic UPDATE, so two
+ * simultaneous requests cannot both succeed. The sender can never open their own item, and neither can anyone outside the chat.
+ */
+export async function claimViewOnce(userId: string, conversationId: string, messageId: string) {
+  const otherId = await assertMember(userId, conversationId)
+  if (await isBlockedEitherWay(userId, otherId)) throw forbidden('You cannot open this', 'BLOCKED')
+  const msg = await prisma.message.findFirst({ where: { id: messageId, conversationId, viewOnce: true } })
+  if (!msg || !msg.attachmentKey) throw notFound('Message not found')
+  if (msg.senderId === userId) throw forbidden('You cannot open your own view-once message', 'OWN_VIEW_ONCE')
+  const now = new Date()
+  const claimed = await prisma.message.updateMany({
+    where: { id: messageId, viewOnce: true, viewedAt: null, attachmentKey: { not: null }, senderId: { not: userId } },
+    data: { viewedAt: now, readAt: msg.readAt ?? now, deliveredAt: msg.deliveredAt ?? now },
+  })
+  if (claimed.count === 0) throw new HttpError(410, 'This was already opened and is no longer available', 'VIEW_ONCE_CONSUMED')
+  const key = msg.attachmentKey
+  const url = await storage.signedUrl(key, VIEW_ONCE_URL_TTL_SECONDS)
+  // Delete the file as soon as the link has expired; purgeViewedMedia() is the safety net if the server restarts first.
+  setTimeout(() => { void removeViewedMedia(messageId, key) }, (VIEW_ONCE_URL_TTL_SECONDS + 30) * 1000).unref()
+  emitToUser(otherId, 'message:viewed', { conversationId, messageId, viewedAt: now })
+  emitToUser(userId, 'message:viewed', { conversationId, messageId, viewedAt: now })
+  return { url, messageType: msg.messageType, expiresInSeconds: VIEW_ONCE_URL_TTL_SECONDS }
+}
+
+async function removeViewedMedia(messageId: string, key: string) {
+  try {
+    await storage.delete(key)
+    await prisma.message.updateMany({ where: { id: messageId, attachmentKey: key }, data: { attachmentKey: null } })
+  } catch (e) { console.error('view-once cleanup failed', e) }
+}
+
+/** Deletes the stored file of every view-once message that was opened more than `graceSeconds` ago. */
+export async function purgeViewedMedia(graceSeconds = VIEW_ONCE_URL_TTL_SECONDS + 30) {
+  const rows = await prisma.message.findMany({
+    where: { viewOnce: true, attachmentKey: { not: null }, viewedAt: { lt: new Date(Date.now() - graceSeconds * 1000) } },
+    select: { id: true, attachmentKey: true },
+    take: 500,
+  })
+  for (const r of rows) await removeViewedMedia(r.id, r.attachmentKey!)
+  return rows.length
 }
