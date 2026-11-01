@@ -6,39 +6,27 @@ import { searchIndexableProviderWhere } from '../services/seo'
 
 export const seoRouter = Router()
 
-// Public, indexable pages of the web app. `lastmod` only where we actually know when the page changed.
-const STATIC_PAGES: { path: string; lastmod?: string }[] = [
-  { path: '/' },
-  { path: '/discover' },
-  { path: '/terms', lastmod: '2026-10-25' },
-  { path: '/privacy', lastmod: '2026-10-25' },
-  { path: '/community-guidelines', lastmod: '2026-10-25' },
-]
-
-const MAX_URLS = 45_000 // the sitemap protocol allows 50,000 per file
+const MAX_URLS = 50_000 // sitemap protocol limit per file
 
 const xmlEscape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 
 /**
- * XML sitemap for the web app. Served on the site's own domain through a Vercel rewrite (client/vercel.json),
- * so every <loc> uses SITE_URL rather than this API's host.
+ * XML sitemap of creator profiles whose owners opted in to search engines. Served on the site's own domain as
+ * /sitemap-profiles.xml through a Vercel rewrite (client/vercel.json), so every <loc> uses SITE_URL rather than this
+ * API's host. The static public pages are listed in client/public/sitemap.xml.
  */
-seoRouter.get('/sitemap.xml', wrap(async (_req, res) => {
+seoRouter.get('/sitemap-profiles.xml', wrap(async (_req, res) => {
   const site = env.SITE_URL.replace(/\/$/, '')
   const providers = await prisma.user.findMany({
     where: searchIndexableProviderWhere,
     select: { username: true, providerProfile: { select: { updatedAt: true } } },
     orderBy: { createdAt: 'asc' },
-    take: MAX_URLS - STATIC_PAGES.length,
+    take: MAX_URLS,
   })
 
-  const urls = [
-    ...STATIC_PAGES.map((p) => ({ loc: site + p.path, lastmod: p.lastmod })),
-    ...providers.map((p) => ({
-      loc: `${site}/profile/${encodeURIComponent(p.username!)}`,
-      lastmod: p.providerProfile?.updatedAt.toISOString(),
-    })),
-  ]
+  const urls = providers.map((p) => ({ loc: `${site}/profile/${encodeURIComponent(p.username!)}`, lastmod: p.providerProfile?.updatedAt.toISOString() }))
+  // The sitemap schema requires at least one <url>; until a creator opts in, point at the profile directory instead.
+  if (!urls.length) urls.push({ loc: `${site}/discover`, lastmod: undefined })
   const body = urls.map((u) => `  <url><loc>${xmlEscape(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}</url>`).join('\n')
 
   res.set({ 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' })
