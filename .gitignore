@@ -14,3 +14,4 @@ dist
 *.log
 *.dump
 .DS_Store
+.neon
