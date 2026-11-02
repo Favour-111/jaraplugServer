@@ -12,7 +12,7 @@ import { getReferralSettings, saveReferralSettings } from '../services/referrals
 import { serializeContent } from '../services/content'
 import { toUserSummary } from '../lib/serializers'
 import { visitorStats } from '../services/analytics'
-import { env } from '../env'
+import { env, sampleAccountsEnabled } from '../env'
 import { storage } from '../storage'
 import { cityField } from '../config/constants'
 import { username as usernameField } from './me'
@@ -297,10 +297,10 @@ adminRouter.post('/support/:id/respond', wrap(async (req, res) => {
   res.json({ ok: true })
 }))
 
-// ─── Demo provider accounts (TESTING ONLY: DEMO_ACCOUNTS=true, never in production) ───
-// The admin creates fictional providers and then acts as them via the X-Act-As header (see auth/index.ts),
-// so every provider screen (content, messages, bookings, profile) works unchanged.
-adminRouter.use('/demo-accounts', (_req, _res, next) => next(env.DEMO_ACCOUNTS ? undefined : notFound()))
+// ─── Demo / sample provider accounts (DEMO_ACCOUNTS outside production, or SAMPLE_PROFILES) ───
+// The admin creates fictional providers and then acts as them via the X-Act-As header (see auth/index.ts) to edit
+// their profile and content. They're publicly labelled as samples and can't message, take bookings or sell content.
+adminRouter.use('/demo-accounts', (_req, _res, next) => next(sampleAccountsEnabled ? undefined : notFound()))
 
 adminRouter.get('/demo-accounts', wrap(async (_req, res) => {
   const users = await prisma.user.findMany({
@@ -345,7 +345,7 @@ adminRouter.post('/demo-accounts', wrap(async (req, res) => {
     await db.providerProfile.create({
       data: {
         userId: u.id, city: body.city, area: body.area, displayAge: body.displayAge ?? null,
-        biography: body.biography || 'Demo profile (fictional) created for testing.',
+        biography: body.biography || 'Sample profile (fictional), shown to illustrate what a JaraPlug profile looks like.',
         verificationStatus: 'VERIFIED', visibility: 'PUBLIC', consentConfirmedAt: now,
       },
     })

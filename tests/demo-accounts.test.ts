@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { api, auth, makeAdmin, makeClient, makeProvider, prisma, resetAll } from './helpers'
+import { api, auth, lagosDate, makeAdmin, makeClient, makeContent, makeProvider, openAvailability, prisma, resetAll } from './helpers'
 
 beforeEach(resetAll)
 
@@ -48,5 +48,40 @@ describe('admin demo accounts (DEMO_ACCOUNTS=true)', () => {
     const res = await api().get('/api/me').set(auth(admin)).set('X-Act-As', body.id).expect(403)
     expect(res.body.code).toBe('ACT_AS_INVALID')
     expect((await api().get('/api/admin/demo-accounts').set(auth(admin))).body.items).toEqual([])
+  })
+})
+
+describe('sample profiles (isDemo providers)', () => {
+  const sample = () => makeProvider({ username: 'sample_amaka', creditBalance: 0, isDemo: true })
+
+  it('are listed after real providers, labelled, and never shown online', async () => {
+    await sample()
+    await makeProvider({ username: 'realone' })
+    const { body } = await api().get('/api/providers').expect(200)
+    expect(body.items.map((p: any) => [p.username, p.isDemo, p.online])).toEqual([['realone', false, false], ['sample_amaka', true, false]])
+  })
+
+  it('cannot be messaged, booked or bought from', async () => {
+    const s = await sample()
+    await openAvailability(s.id)
+    const item = await makeContent(s.id)
+    const client = await makeClient({ creditBalance: 100 })
+    expect((await api().post('/api/conversations').set(auth(client)).send({ username: 'sample_amaka' }).expect(403)).body.code).toBe('SAMPLE_PROFILE')
+    expect((await api().post('/api/bookings').set(auth(client)).send({ providerUsername: 'sample_amaka', date: lagosDate(2), time: '14:00' }).expect(403)).body.code).toBe('SAMPLE_PROFILE')
+    expect((await api().post('/api/purchases/unlock').set(auth(client)).send({ contentId: item.id }).expect(403)).body.code).toBe('SAMPLE_PROFILE')
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: client.id } })).toMatchObject({ creditBalance: 100 })
+    expect(await prisma.conversation.count()).toBe(0)
+    expect(await prisma.booking.count()).toBe(0)
+  })
+
+  it('cannot send messages, even when an admin acts as one inside an existing conversation', async () => {
+    const admin = await makeAdmin()
+    const { body: s } = await create(admin)
+    const client = await makeClient()
+    const pairKey = [client.id, s.id].sort().join(':')
+    const convo = await prisma.conversation.create({ data: { pairKey, participants: { create: [{ userId: client.id }, { userId: s.id }] } } })
+    await api().post(`/api/conversations/${convo.id}/messages`).set(auth(admin)).set('X-Act-As', s.id).send({ body: 'hi' }).expect(403)
+    await api().post(`/api/conversations/${convo.id}/messages`).set(auth(client)).send({ body: 'hi' }).expect(403)
+    expect(await prisma.message.count()).toBe(0)
   })
 })

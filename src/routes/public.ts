@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
-import { env } from '../env'
+import { env, sampleAccountsEnabled } from '../env'
 import { CITY_SUGGESTIONS, BOOKING_LEAD_HOURS, BOOKING_MAX_DAYS_AHEAD, LAGOS_OFFSET, BOOKING_DURATION_MINS, MAX_PAID_PRICE_KOBO, MIN_PAID_PRICE_KOBO } from '../config/constants'
 import { notFound, wrap } from '../lib/errors'
 import { resolveLocalPath, verifyMediaToken } from '../storage'
@@ -30,7 +30,7 @@ publicRouter.get('/config', (_req, res) => {
   res.json({
     authMode: env.AUTH_MODE,
     demoAutoVerify: env.DEMO_AUTO_VERIFY,
-    demoAccounts: env.DEMO_ACCOUNTS,
+    demoAccounts: sampleAccountsEnabled,
     cities: CITY_SUGGESTIONS,
     maxImageMb: env.MAX_IMAGE_MB,
     maxVideoMb: env.MAX_VIDEO_MB,
@@ -127,7 +127,8 @@ publicRouter.get('/providers', optionalAuth, wrap(async (req, res) => {
   const rows = await prisma.user.findMany({
     where,
     include: { providerProfile: true },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    // Real providers first; sample profiles fill in after them.
+    orderBy: [{ isDemo: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
     take: q.limit + 1,
     ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
   })

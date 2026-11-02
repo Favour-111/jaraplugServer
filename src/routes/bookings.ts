@@ -5,6 +5,7 @@ import { BOOKING_DURATION_MINS, LAGOS_OFFSET } from '../config/constants'
 import { badRequest, conflict, forbidden, notFound, wrap } from '../lib/errors'
 import { me, requireAuth, requireRole, requireVerifiedAdult } from '../auth'
 import { isBlockedEitherWay } from '../services/blocks'
+import { assertNotSample } from '../services/sample'
 import { computeSlots } from './public'
 import { notify } from '../services/notify'
 import { toUserSummary } from '../lib/serializers'
@@ -52,6 +53,7 @@ bookingsRouter.post('/', requireRole('CLIENT'), requireVerifiedAdult, wrap(async
   const profile = provider?.providerProfile
   if (!provider || !profile || profile.verificationStatus !== 'VERIFIED' || profile.visibility === 'HIDDEN') throw notFound('Provider not found')
   if (await isBlockedEitherWay(u.id, provider.id)) throw notFound('Provider not found')
+  assertNotSample(provider)
 
   const slots = await computeSlots(provider.id, body.date)
   if (!slots.includes(body.time)) throw conflict('That time is not available', 'SLOT_UNAVAILABLE')

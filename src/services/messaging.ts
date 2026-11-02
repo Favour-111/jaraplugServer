@@ -4,6 +4,7 @@ import { badRequest, forbidden, HttpError, notFound } from '../lib/errors'
 import { emitToUser, isOnline } from './realtime'
 import { isBlockedEitherWay } from './blocks'
 import { storage } from '../storage'
+import { assertNotSample } from './sample'
 
 /** How long the link handed out when a view-once item is opened stays valid. */
 export const VIEW_ONCE_URL_TTL_SECONDS = 120
@@ -82,6 +83,7 @@ export async function sendMessage(input: {
   if (sender.role !== 'ADMIN' && sender.ageVerificationStatus !== 'VERIFIED')
     throw forbidden('Age verification is required before you can send messages', 'AGE_VERIFICATION_REQUIRED')
   if (!other || other.accountStatus !== 'ACTIVE') throw forbidden('This user is no longer available')
+  assertNotSample(sender, other)
   if (await isBlockedEitherWay(input.senderId, otherId)) throw forbidden('You cannot message this user', 'BLOCKED')
   checkRate(input.senderId)
 

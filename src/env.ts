@@ -46,6 +46,9 @@ const schema = z.object({
   DEMO_AUTO_VERIFY: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   // TESTING ONLY: lets admins create demo provider accounts and act as them (X-Act-As). Refused in production.
   DEMO_ACCOUNTS: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // Production-safe: lets admins publish clearly labelled sample providers and curate them (act as them to edit
+  // profile/content). Sample accounts can never message, take bookings or sell content (see services/sample.ts).
+  SAMPLE_PROFILES: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 })
 
 const parsed = schema.safeParse(process.env)
@@ -85,4 +88,6 @@ if (env.STORAGE_DRIVER === 's3' && !(env.S3_BUCKET && env.S3_REGION && env.S3_AC
 }
 
 export const isDev = env.NODE_ENV !== 'production'
+/** Admin demo/sample account management: DEMO_ACCOUNTS outside production, or SAMPLE_PROFILES anywhere. */
+export const sampleAccountsEnabled = env.SAMPLE_PROFILES || (env.DEMO_ACCOUNTS && env.NODE_ENV !== 'production')
 export const clientOrigins = env.CLIENT_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)

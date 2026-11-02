@@ -2,7 +2,7 @@ import type { Request, RequestHandler } from 'express'
 import jwt from 'jsonwebtoken'
 import type { User } from '@prisma/client'
 import { prisma } from '../db'
-import { env } from '../env'
+import { env, sampleAccountsEnabled } from '../env'
 import { forbidden, unauthorized, wrap } from '../lib/errors'
 
 declare global {
@@ -24,11 +24,12 @@ async function applyDemoAutoVerify(user: User): Promise<User> {
 }
 
 /**
- * DEMO_ACCOUNTS (non-production only): an admin may act as one of their demo provider accounts.
+ * DEMO_ACCOUNTS (non-production) or SAMPLE_PROFILES: an admin may act as one of their demo/sample provider accounts
+ * to curate it. Sample accounts can't message, take bookings or sell content, so acting as one can't reach real users.
  * Returns the demo account, or null if acting isn't allowed for this admin/target.
  */
 export async function resolveActAs(admin: User, targetId: string): Promise<User | null> {
-  if (!env.DEMO_ACCOUNTS || env.NODE_ENV === 'production' || admin.role !== 'ADMIN') return null
+  if (!sampleAccountsEnabled || admin.role !== 'ADMIN') return null
   const target = await prisma.user.findUnique({ where: { id: targetId } })
   if (!target || !target.isDemo || target.role !== 'PROVIDER' || target.accountStatus !== 'ACTIVE') return null
   return target
@@ -108,6 +109,30 @@ const bearer = (req: Request) => {
   return h?.startsWith('Bearer ') ? h.slice(7) : null
 }
 
+// ── Upload tickets ──
+// Clerk session tokens live ~60s, and a proxy in front of the API may hold a large upload until it has fully arrived,
+// so a slow video upload reaches us with an expired bearer token. Before uploading, the client swaps its fresh token
+// for an upload ticket: signed by us, bound to the user, valid only on multipart requests, for UPLOAD_TICKET_TTL.
+const UPLOAD_TICKET_TTL_SECONDS = 60 * 60
+const uploadTicketSecret = () => `${env.MEDIA_SIGNING_SECRET}:upload-ticket`
+
+export const signUploadTicket = (u: User) => ({
+  ticket: jwt.sign({ sub: u.authProviderId, purpose: 'upload' }, uploadTicketSecret(), { expiresIn: UPLOAD_TICKET_TTL_SECONDS, algorithm: 'HS256' }),
+  expiresAt: new Date(Date.now() + UPLOAD_TICKET_TTL_SECONDS * 1000),
+})
+
+/** The ticket's subject, if the request is a multipart upload carrying a valid X-Upload-Ticket. */
+function uploadTicketSubject(req: Request): string | null {
+  const t = req.headers['x-upload-ticket']
+  if (typeof t !== 'string' || !t || !req.is('multipart/form-data')) return null
+  try {
+    const p = jwt.verify(t, uploadTicketSecret(), { algorithms: ['HS256'] }) as jwt.JwtPayload
+    return p.purpose === 'upload' && typeof p.sub === 'string' ? p.sub : null
+  } catch {
+    return null
+  }
+}
+
 const touchLastSeen = (u: User) => {
   if (!u.lastSeenAt || Date.now() - u.lastSeenAt.getTime() > 60_000) {
     prisma.user.update({ where: { id: u.id }, data: { lastSeenAt: new Date() } }).catch(() => {})
@@ -117,8 +142,9 @@ const touchLastSeen = (u: User) => {
 /** Requires a valid session. Suspended or deleted accounts are rejected on the backend. */
 export const requireAuth: RequestHandler = wrap(async (req, _res, next) => {
   const token = bearer(req)
-  if (!token) throw unauthorized()
-  const v = await verifyBearer(token)
+  const ticketSub = uploadTicketSubject(req)
+  if (!token && !ticketSub) throw unauthorized()
+  const v = (token ? await verifyBearer(token) : null) ?? (ticketSub ? { sub: ticketSub } : null)
   if (!v) throw unauthorized('Invalid or expired session')
   const user = await applyDemoAutoVerify(await loadOrCreateUser(v.sub))
   if (user.accountStatus === 'SUSPENDED') throw forbidden('This account has been suspended', 'ACCOUNT_SUSPENDED')

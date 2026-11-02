@@ -7,9 +7,10 @@ import { me, requireAuth, requireVerifiedAdult } from '../auth'
 import { assertMember, claimViewOnce, getOrCreateConversation, markConversationRead, sendMessage, serializeMessage } from '../services/messaging'
 import { toUserSummary } from '../lib/serializers'
 import { contentUpload, processImage, rm, validateUpload, validateVoiceNote, voiceUpload, VOICE_NOTE_MAX_SECONDS } from '../lib/upload'
-import { probeVideo } from '../lib/video'
+import { faststart, probeVideo } from '../lib/video'
 import { storage } from '../storage'
 import { blockedIdsFor } from '../services/blocks'
+import { assertNotSample } from '../services/sample'
 
 export const messagesRouter = Router()
 messagesRouter.use(requireAuth)
@@ -58,6 +59,7 @@ messagesRouter.post('/', requireVerifiedAdult, wrap(async (req, res) => {
   const { username } = z.object({ username: z.string().min(1) }).parse(req.body)
   const other = await prisma.user.findFirst({ where: { username: { equals: username, mode: 'insensitive' }, accountStatus: 'ACTIVE' }, include: { providerProfile: true } })
   if (!other || other.id === u.id) throw notFound('User not found')
+  assertNotSample(u, other)
   // Clients may only start conversations with listed providers; providers reply to existing ones or message clients who contacted them.
   if (u.role === 'CLIENT' && !(other.role === 'PROVIDER' && other.providerProfile?.verificationStatus === 'VERIFIED' && other.providerProfile.visibility !== 'HIDDEN'))
     throw notFound('User not found')
@@ -117,7 +119,8 @@ messagesRouter.post('/:id/attachments', contentUpload.single('file'), wrap(async
       if (req.file!.size > CHAT_VIDEO_MAX_BYTES) throw badRequest('Chat videos must be under 25MB', 'FILE_TOO_LARGE')
       const probe = await probeVideo(req.file!.path).catch(() => ({ poster: null, durationSeconds: null }))
       const key = `messages/${id}/${crypto.randomUUID()}.${sniffed.ext}`
-      await storage.putFile(key, req.file!.path, sniffed.mime)
+      const fast = await faststart(req.file!.path, sniffed.ext)
+      try { await storage.putFile(key, fast ?? req.file!.path, sniffed.mime) } finally { await rm(fast ?? undefined) }
       res.status(201).json(await sendMessage({ senderId: u.id, conversationId: id, attachmentKey: key, messageType: 'VIDEO', durationSeconds: probe.durationSeconds ? Math.round(probe.durationSeconds) : undefined, body: caption, viewOnce }))
     }
   } finally {

@@ -18,7 +18,8 @@ export async function toProviderCard(
     city: profile.city,
     area: pf.area !== false ? profile.area : null,
     availabilityStatus: profile.availabilityStatus,
-    online: isOnline(user.id),
+    // Sample profiles never look reachable (an admin curating one would otherwise show it online).
+    online: !user.isDemo && isOnline(user.id),
     verified: profile.verificationStatus === 'VERIFIED',
     avatarUrl: profile.profileImage ? await storage.signedUrl(profile.profileImage, 3600) : null,
     isFavorite: !!opts.isFavorite,

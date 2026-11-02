@@ -5,7 +5,7 @@ import { applyReferral } from '../services/referrals'
 import { env } from '../env'
 import { cityField } from '../config/constants'
 import { badRequest, conflict, forbidden, wrap } from '../lib/errors'
-import { me, requireAuth } from '../auth'
+import { me, requireAuth, signUploadTicket } from '../auth'
 import { toSelf } from '../lib/serializers'
 import { imageUpload, processImage, rm, validateUpload } from '../lib/upload'
 import { storage } from '../storage'
@@ -14,6 +14,10 @@ import { emitToUser } from '../services/realtime'
 
 export const meRouter = Router()
 meRouter.use(requireAuth)
+
+/** Short-lived credential for one slow upload; see signUploadTicket in auth/index.ts. */
+// Issued to the signed-in account itself (the admin, when acting as a demo account); X-Act-As still applies on upload.
+meRouter.post('/upload-ticket', (req, res) => { res.json(signUploadTicket(req.actingAdmin ?? me(req))) })
 
 export const username = z
   .string()

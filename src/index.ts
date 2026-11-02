@@ -5,6 +5,7 @@ import { attachRealtime } from './services/realtime'
 import { prisma } from './db'
 import { checkStorageConfig } from './storage'
 import { purgeViewedMedia } from './services/messaging'
+import { hasFfmpeg } from './lib/video'
 
 const app = createApp()
 const server = http.createServer(app)
@@ -21,6 +22,7 @@ server.listen(env.PORT, () => {
   if (env.DEMO_AUTO_VERIFY) console.warn('⚠  DEMO_AUTO_VERIFY=true — age verification is DISABLED for testing. Remove it before production (the API refuses to boot with it in production).')
   if (!env.PAYSTACK_SECRET_KEY) console.warn('⚠  PAYSTACK_SECRET_KEY is not set — buying credits is unavailable.')
   else if (!env.PAYSTACK_SECRET_KEY.startsWith('sk_live_')) console.warn('⚠  Paystack TEST key in use — no real money moves until you switch to an sk_live_ key.')
+  void hasFfmpeg().then((ok) => { if (!ok) console.warn('⚠  ffmpeg not found — uploaded videos get no poster frame or fast-start, so they start playing slowly.') })
 })
 
 const shutdown = async () => {

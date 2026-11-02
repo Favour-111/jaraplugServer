@@ -6,6 +6,7 @@ import { env } from '../env'
 import { conflict, forbidden, notFound, wrap, badRequest } from '../lib/errors'
 import { me, requireAuth, requireVerifiedAdult } from '../auth'
 import { isBlockedEitherWay } from '../services/blocks'
+import { assertNotSample } from '../services/sample'
 import { isListable } from '../services/content'
 import { paymentProvider } from '../payments/provider'
 import { applyPaymentEvent, notifyPurchase, processPaymentWebhook } from '../payments/webhook'
@@ -35,6 +36,7 @@ purchasesRouter.post('/unlock', requireVerifiedAdult, wrap(async (req, res) => {
   if (content.providerId === u.id) throw forbidden('You cannot buy your own content')
   const seller = await prisma.user.findUnique({ where: { id: content.providerId } })
   if (!seller || seller.accountStatus !== 'ACTIVE' || (await isBlockedEitherWay(u.id, seller.id))) throw notFound('Content not found')
+  assertNotSample(seller)
   // Price comes from OUR database, never from the request.
   const credits = kobotoCredits(content.price)
   if (credits === null) throw badRequest('This item is not priced in credits yet', 'NOT_PRICED_IN_CREDITS')

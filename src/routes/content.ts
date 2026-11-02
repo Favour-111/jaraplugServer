@@ -1,13 +1,14 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import sharp from 'sharp'
 import { prisma } from '../db'
 import { MAX_PAID_PRICE_KOBO, MIN_PAID_PRICE_KOBO } from '../config/constants'
 import { badRequest, conflict, forbidden, notFound, wrap } from '../lib/errors'
 import { me, optionalAuth, requireAuth, requireRole } from '../auth'
 import { contentUpload, processImage, rm, validateUpload } from '../lib/upload'
-import { probeVideo } from '../lib/video'
+import { faststart, probeVideo } from '../lib/video'
 import { storage } from '../storage'
 import { canAccessContent, serializeContent } from '../services/content'
 import { nairaToKobo } from '../lib/money'
@@ -60,6 +61,7 @@ contentRouter.get('/mine', requireAuth, requireRole('PROVIDER'), wrap(async (req
 contentRouter.post('/', requireAuth, requireRole('PROVIDER'), contentUpload.single('file'), wrap(async (req, res) => {
   const u = me(req)
   const tmp = req.file?.path
+  let fast: string | null = null
   try {
     const sniffed = await validateUpload(req.file, ['IMAGE', 'VIDEO'])
     const f = uploadFields.parse(req.body)
@@ -79,6 +81,7 @@ contentRouter.post('/', requireAuth, requireRole('PROVIDER'), contentUpload.sing
     const blur = f.visibility === 'PAID'
     let thumb: Buffer
     let durationSeconds: number | null = null
+    let sizeBytes = req.file!.size
     let main: { path: string; mime: string } = { path: req.file!.path, mime: sniffed.mime }
 
     if (sniffed.kind === 'IMAGE') {
@@ -94,7 +97,9 @@ contentRouter.post('/', requireAuth, requireRole('PROVIDER'), contentUpload.sing
         const base = sharp(probe.poster).resize({ width: 480 })
         thumb = await (blur ? base.resize({ width: 24 }).blur(1).resize({ width: 480, kernel: 'cubic' }) : base).jpeg({ quality: 70 }).toBuffer()
       } else thumb = await placeholderThumb(blur)
-      await storage.putFile(storageKey, req.file!.path, sniffed.mime)
+      fast = await faststart(req.file!.path, sniffed.ext)
+      if (fast) sizeBytes = (await fs.promises.stat(fast)).size
+      await storage.putFile(storageKey, fast ?? req.file!.path, sniffed.mime)
     }
     await storage.putBuffer(thumbKey, thumb, 'image/jpeg')
 
@@ -102,13 +107,14 @@ contentRouter.post('/', requireAuth, requireRole('PROVIDER'), contentUpload.sing
     const content = await prisma.mediaContent.create({
       data: {
         id, providerId: u.id, title: f.title, description: f.description, mediaType: sniffed.kind, mimeType: main.mime,
-        sizeBytes: req.file!.size, storageKey: finalKey, thumbnailKey: thumbKey, visibility: f.visibility, price: priceKobo,
+        sizeBytes, storageKey: finalKey, thumbnailKey: thumbKey, visibility: f.visibility, price: priceKobo,
         status: publish ? 'PUBLISHED' : 'DRAFT', moderationStatus: 'APPROVED', consentConfirmed: consent, durationSeconds,
       },
     })
     res.status(201).json(await serializeContent(content, u))
   } finally {
     await rm(tmp)
+    await rm(fast ?? undefined)
   }
 }))
 
