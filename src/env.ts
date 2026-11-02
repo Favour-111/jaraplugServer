@@ -44,6 +44,8 @@ const schema = z.object({
 
   // TESTING ONLY: auto-approves age/identity verification for every onboarded user. Refused in production.
   DEMO_AUTO_VERIFY: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // TESTING ONLY: lets admins create demo provider accounts and act as them (X-Act-As). Refused in production.
+  DEMO_ACCOUNTS: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 })
 
 const parsed = schema.safeParse(process.env)
@@ -59,6 +61,7 @@ export const env = parsed.data
 if (env.NODE_ENV === 'production') {
   const problems: string[] = []
   if (env.DEMO_AUTO_VERIFY) problems.push('DEMO_AUTO_VERIFY=true disables age verification and must be removed in production.')
+  if (env.DEMO_ACCOUNTS) problems.push('DEMO_ACCOUNTS=true lets admins act as other accounts and must be removed in production.')
   if (env.AUTH_MODE !== 'clerk') problems.push('AUTH_MODE must be "clerk" in production (dev auth is insecure).')
   if (!env.CLERK_SECRET_KEY) problems.push('CLERK_SECRET_KEY is required in production.')
   if (!env.PAYSTACK_SECRET_KEY?.startsWith('sk_live_'))

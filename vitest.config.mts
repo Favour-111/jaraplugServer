@@ -10,6 +10,6 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 30000,
     // Tests always run against dev auth, a fake Paystack key (the network is stubbed) and local storage, whatever server/.env says.
-    env: { NODE_ENV: 'test', AUTH_MODE: 'dev', PAYSTACK_SECRET_KEY: 'sk_test_unit_test_secret', CREDIT_PRICE_KOBO: '50000', STORAGE_DRIVER: 'local', LOCAL_STORAGE_DIR: './storage-test', MIN_PAYOUT_KOBO: '100000', PAYOUT_HOLD_DAYS: '7', DEMO_AUTO_VERIFY: 'false' },
+    env: { NODE_ENV: 'test', AUTH_MODE: 'dev', PAYSTACK_SECRET_KEY: 'sk_test_unit_test_secret', CREDIT_PRICE_KOBO: '50000', STORAGE_DRIVER: 'local', LOCAL_STORAGE_DIR: './storage-test', MIN_PAYOUT_KOBO: '100000', PAYOUT_HOLD_DAYS: '7', DEMO_AUTO_VERIFY: 'false', DEMO_ACCOUNTS: 'true' },
   },
 })

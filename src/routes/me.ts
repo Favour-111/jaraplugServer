@@ -15,7 +15,7 @@ import { emitToUser } from '../services/realtime'
 export const meRouter = Router()
 meRouter.use(requireAuth)
 
-const username = z
+export const username = z
   .string()
   .trim()
   .toLowerCase()

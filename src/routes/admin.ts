@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import { badRequest, conflict, forbidden, notFound, wrap } from '../lib/errors'
-import { me, requireAuth, requireRole } from '../auth'
+import { me, requireAuth, requireRole, resolveActAs } from '../auth'
 import { audit } from '../services/audit'
 import { notify } from '../services/notify'
 import { formatNaira } from '../lib/money'
@@ -12,6 +12,10 @@ import { getReferralSettings, saveReferralSettings } from '../services/referrals
 import { serializeContent } from '../services/content'
 import { toUserSummary } from '../lib/serializers'
 import { visitorStats } from '../services/analytics'
+import { env } from '../env'
+import { storage } from '../storage'
+import { cityField } from '../config/constants'
+import { username as usernameField } from './me'
 
 export const adminRouter = Router()
 adminRouter.use(requireAuth, requireRole('ADMIN'))
@@ -290,6 +294,85 @@ adminRouter.post('/support/:id/respond', wrap(async (req, res) => {
     audit(admin.id, 'SUPPORT_RESPONDED', 'SupportRequest', s.id, body.response.slice(0, 200)) as any,
   ])
   await notify(s.userId, 'SUPPORT', 'Support replied to your request', s.subject)
+  res.json({ ok: true })
+}))
+
+// ─── Demo provider accounts (TESTING ONLY: DEMO_ACCOUNTS=true, never in production) ───
+// The admin creates fictional providers and then acts as them via the X-Act-As header (see auth/index.ts),
+// so every provider screen (content, messages, bookings, profile) works unchanged.
+adminRouter.use('/demo-accounts', (_req, _res, next) => next(env.DEMO_ACCOUNTS ? undefined : notFound()))
+
+adminRouter.get('/demo-accounts', wrap(async (_req, res) => {
+  const users = await prisma.user.findMany({
+    where: { isDemo: true, role: 'PROVIDER', accountStatus: 'ACTIVE' },
+    orderBy: { createdAt: 'desc' },
+    include: { providerProfile: true, _count: { select: { content: true } } },
+  })
+  const items = await Promise.all(users.map(async (u) => {
+    const [unread, pendingBookings] = await Promise.all([
+      prisma.message.count({ where: { senderId: { not: u.id }, readAt: null, conversation: { participants: { some: { userId: u.id } } } } }),
+      prisma.booking.count({ where: { providerId: u.id, status: 'PENDING' } }),
+    ])
+    const p = u.providerProfile
+    return {
+      id: u.id, username: u.username, displayName: u.displayName, city: p?.city ?? u.city, area: p?.area ?? null,
+      avatarUrl: p?.profileImage ? await storage.signedUrl(p.profileImage, 3600) : null,
+      contentCount: u._count.content, unread, pendingBookings, createdAt: u.createdAt,
+    }
+  }))
+  res.json({ items })
+}))
+
+adminRouter.post('/demo-accounts', wrap(async (req, res) => {
+  const admin = me(req)
+  const body = z.object({
+    username: usernameField,
+    displayName: z.string().trim().min(2).max(40),
+    city: cityField,
+    area: z.string().trim().max(60).optional(),
+    displayAge: z.number().int().min(18).max(99).optional(),
+    biography: z.string().trim().max(1000).optional(),
+  }).parse(req.body)
+  if (await prisma.user.findUnique({ where: { username: body.username } })) throw conflict('That username is taken', 'USERNAME_TAKEN')
+  const now = new Date()
+  const user = await prisma.$transaction(async (db) => {
+    const u = await db.user.create({
+      data: {
+        authProviderId: `demo_${crypto.randomUUID()}`, username: body.username, displayName: body.displayName, role: 'PROVIDER', isDemo: true,
+        city: body.city, ageVerificationStatus: 'VERIFIED', onboardedAt: now, termsAcceptedAt: now, privacyAcceptedAt: now,
+      },
+    })
+    await db.providerProfile.create({
+      data: {
+        userId: u.id, city: body.city, area: body.area, displayAge: body.displayAge ?? null,
+        biography: body.biography || 'Demo profile (fictional) created for testing.',
+        verificationStatus: 'VERIFIED', visibility: 'PUBLIC', consentConfirmedAt: now,
+      },
+    })
+    await audit(admin.id, 'DEMO_ACCOUNT_CREATED', 'User', u.id, undefined, { username: u.username }, db)
+    return u
+  })
+  res.status(201).json({ id: user.id, username: user.username })
+}))
+
+/** Called by the client before it starts sending X-Act-As, so each session is recorded. */
+adminRouter.post('/demo-accounts/:id/act', wrap(async (req, res) => {
+  const admin = me(req)
+  const target = await resolveActAs(admin, String(req.params.id))
+  if (!target) throw notFound('Demo account not found')
+  await audit(admin.id, 'DEMO_ACCOUNT_ACT_AS', 'User', target.id, undefined, { username: target.username })
+  res.json({ id: target.id, username: target.username, displayName: target.displayName })
+}))
+
+adminRouter.delete('/demo-accounts/:id', wrap(async (req, res) => {
+  const admin = me(req)
+  const target = await resolveActAs(admin, String(req.params.id))
+  if (!target) throw notFound('Demo account not found')
+  await prisma.$transaction(async (db) => {
+    await db.providerProfile.updateMany({ where: { userId: target.id }, data: { visibility: 'HIDDEN' } })
+    await db.user.update({ where: { id: target.id }, data: { accountStatus: 'DELETED', username: null, displayName: 'Deleted demo account' } })
+    await audit(admin.id, 'DEMO_ACCOUNT_DELETED', 'User', target.id, undefined, { username: target.username }, db)
+  })
   res.json({ ok: true })
 }))
 

@@ -10,6 +10,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: User
+      /** Set when an admin is acting as a demo provider (req.user is then the demo account). */
+      actingAdmin?: User
     }
   }
 }
@@ -19,6 +21,32 @@ async function applyDemoAutoVerify(user: User): Promise<User> {
   if (!env.DEMO_AUTO_VERIFY || !user.onboardedAt || user.ageVerificationStatus === 'VERIFIED') return user
   await prisma.providerProfile.updateMany({ where: { userId: user.id, verificationStatus: { not: 'VERIFIED' } }, data: { verificationStatus: 'VERIFIED' } })
   return prisma.user.update({ where: { id: user.id }, data: { ageVerificationStatus: 'VERIFIED' } })
+}
+
+/**
+ * DEMO_ACCOUNTS (non-production only): an admin may act as one of their demo provider accounts.
+ * Returns the demo account, or null if acting isn't allowed for this admin/target.
+ */
+export async function resolveActAs(admin: User, targetId: string): Promise<User | null> {
+  if (!env.DEMO_ACCOUNTS || env.NODE_ENV === 'production' || admin.role !== 'ADMIN') return null
+  const target = await prisma.user.findUnique({ where: { id: targetId } })
+  if (!target || !target.isDemo || target.role !== 'PROVIDER' || target.accountStatus !== 'ACTIVE') return null
+  return target
+}
+
+const actAsHeader = (req: Request) => {
+  const h = req.headers['x-act-as']
+  return typeof h === 'string' && h ? h : null
+}
+
+/** Swaps req.user for the demo account named in X-Act-As; rejects the request if that isn't allowed. */
+async function applyActAs(req: Request, user: User): Promise<User> {
+  const targetId = actAsHeader(req)
+  if (!targetId) return user
+  const target = await resolveActAs(user, targetId)
+  if (!target) throw forbidden('You can no longer act as this demo account', 'ACT_AS_INVALID')
+  req.actingAdmin = user
+  return target
 }
 
 export const signDevToken = (authProviderId: string) =>
@@ -95,8 +123,8 @@ export const requireAuth: RequestHandler = wrap(async (req, _res, next) => {
   const user = await applyDemoAutoVerify(await loadOrCreateUser(v.sub))
   if (user.accountStatus === 'SUSPENDED') throw forbidden('This account has been suspended', 'ACCOUNT_SUSPENDED')
   if (user.accountStatus === 'DELETED') throw unauthorized('Account no longer exists')
-  req.user = user
-  touchLastSeen(user)
+  req.user = await applyActAs(req, user)
+  touchLastSeen(req.user)
   next()
 })
 
@@ -105,7 +133,7 @@ export const optionalAuth: RequestHandler = wrap(async (req, _res, next) => {
   const token = bearer(req)
   if (token) {
     const user = await resolveUserFromToken(token)
-    if (user) req.user = user
+    if (user) req.user = await applyActAs(req, user)
   }
   next()
 })

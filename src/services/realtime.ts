@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'node:http'
 import { Server } from 'socket.io'
 import { clientOrigins } from '../env'
-import { resolveUserFromToken } from '../auth'
+import { resolveActAs, resolveUserFromToken } from '../auth'
 import { sendMessage, markConversationRead, assertMember } from './messaging' // circular with messaging, but only used at call time
 
 let io: Server | null = null
@@ -20,7 +20,11 @@ export function attachRealtime(server: HttpServer) {
   })
 
   io.use(async (socket, next) => {
-    const user = await resolveUserFromToken(socket.handshake.auth?.token)
+    const real = await resolveUserFromToken(socket.handshake.auth?.token)
+    if (!real) return next(new Error('unauthorized'))
+    // An admin acting as a demo provider gets that account's socket room (messages, typing, presence).
+    const actAs = socket.handshake.auth?.actAs
+    const user = typeof actAs === 'string' && actAs ? await resolveActAs(real, actAs) : real
     if (!user) return next(new Error('unauthorized'))
     socket.data.userId = user.id
     next()

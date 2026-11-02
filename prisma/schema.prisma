@@ -202,6 +202,7 @@ model User {
   verificationRequests VerificationRequest[]     @relation("VerificationSubject")
   payouts              Payout[]
   supportRequests      SupportRequest[]
+  contentLikes         ContentLike[]
 
   @@index([role, accountStatus])
 }
@@ -255,6 +256,7 @@ model MediaContent {
   provider  User              @relation(fields: [providerId], references: [id], onDelete: Cascade)
   purchases ContentPurchase[]
   reports   Report[]
+  likes     ContentLike[]
 
   @@index([providerId, status, moderationStatus])
 }
@@ -489,6 +491,19 @@ model Availability {
   provider User @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
   @@index([providerId, dayOfWeek])
+}
+
+/// A "love" on a gallery post. One per user per item.
+model ContentLike {
+  userId    String
+  contentId String
+  createdAt DateTime @default(now())
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content MediaContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@id([userId, contentId])
+  @@index([contentId])
 }
 
 model Favorite {

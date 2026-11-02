@@ -30,6 +30,7 @@ publicRouter.get('/config', (_req, res) => {
   res.json({
     authMode: env.AUTH_MODE,
     demoAutoVerify: env.DEMO_AUTO_VERIFY,
+    demoAccounts: env.DEMO_ACCOUNTS,
     cities: CITY_SUGGESTIONS,
     maxImageMb: env.MAX_IMAGE_MB,
     maxVideoMb: env.MAX_VIDEO_MB,

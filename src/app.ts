@@ -17,6 +17,7 @@ import { bookingsRouter } from './routes/bookings'
 import { socialRouter } from './routes/social'
 import { verificationRouter } from './routes/verification'
 import { adminRouter } from './routes/admin'
+import { galleryRouter } from './routes/gallery'
 
 export function createApp() {
   const app = express()
@@ -52,6 +53,7 @@ export function createApp() {
   app.use('/api/referrals', referralsRouter)
   app.use('/api/conversations', messagesRouter)
   app.use('/api/bookings', bookingsRouter)
+  app.use('/api/gallery', galleryRouter)
   app.use('/api', socialRouter)
   app.use('/api/admin', adminRouter)
 
