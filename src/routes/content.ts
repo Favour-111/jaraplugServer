@@ -40,8 +40,9 @@ function validatePricing(visibility: string, priceKobo: number) {
 }
 
 const requireVerifiedProvider = wrap(async (req, _res, next) => {
+  // Providers no longer need a review to publish; they only need a provider profile.
   const p = await prisma.providerProfile.findUnique({ where: { userId: me(req).id } })
-  if (p?.verificationStatus !== 'VERIFIED') throw forbidden('Your profile must be verified before you can publish content', 'PROVIDER_NOT_VERIFIED')
+  if (!p) throw forbidden('Set up your provider profile before publishing content', 'PROVIDER_PROFILE_REQUIRED')
   next()
 })
 
@@ -71,8 +72,6 @@ contentRouter.post('/', requireAuth, requireRole('PROVIDER'), contentUpload.sing
     const consent = f.consentConfirmed === 'true'
     if (publish) {
       if (!consent) throw badRequest('You must confirm you own the rights to this media and that everyone shown is an adult who consented to its publication', 'CONSENT_REQUIRED')
-      const profile = await prisma.providerProfile.findUnique({ where: { userId: u.id } })
-      if (profile?.verificationStatus !== 'VERIFIED') throw forbidden('Your profile must be verified before you can publish content', 'PROVIDER_NOT_VERIFIED')
     }
 
     const id = crypto.randomUUID()
@@ -142,8 +141,6 @@ contentRouter.patch('/:id', requireAuth, requireRole('PROVIDER'), wrap(async (re
   const consent = body.consentConfirmed ?? content.consentConfirmed
   if (body.publish === true) {
     if (!consent) throw badRequest('Rights and consent confirmation is required to publish', 'CONSENT_REQUIRED')
-    const profile = await prisma.providerProfile.findUnique({ where: { userId: u.id } })
-    if (profile?.verificationStatus !== 'VERIFIED') throw forbidden('Your profile must be verified before you can publish content', 'PROVIDER_NOT_VERIFIED')
   }
   const updated = await prisma.mediaContent.update({
     where: { id: content.id },

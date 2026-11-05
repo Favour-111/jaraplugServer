@@ -14,7 +14,7 @@ socialRouter.use(requireAuth)
 socialRouter.get('/favorites', wrap(async (req, res) => {
   const u = me(req)
   const rows = await prisma.favorite.findMany({
-    where: { userId: u.id, provider: { accountStatus: 'ACTIVE', providerProfile: { is: { verificationStatus: 'VERIFIED', visibility: { not: 'HIDDEN' } } } } },
+    where: { userId: u.id, provider: { accountStatus: 'ACTIVE', providerProfile: { is: { visibility: { not: 'HIDDEN' } } } } },
     orderBy: { createdAt: 'desc' },
     include: { provider: { include: { providerProfile: true } } },
   })

@@ -51,7 +51,7 @@ bookingsRouter.post('/', requireRole('CLIENT'), requireVerifiedAdult, wrap(async
     include: { providerProfile: true },
   })
   const profile = provider?.providerProfile
-  if (!provider || !profile || profile.verificationStatus !== 'VERIFIED' || profile.visibility === 'HIDDEN') throw notFound('Provider not found')
+  if (!provider || !profile || profile.visibility === 'HIDDEN') throw notFound('Provider not found')
   if (await isBlockedEitherWay(u.id, provider.id)) throw notFound('Provider not found')
   assertNotSample(provider)
 

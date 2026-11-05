@@ -98,7 +98,6 @@ publicRouter.get('/providers', optionalAuth, wrap(async (req, res) => {
   const blocked = viewer ? await blockedIdsFor(viewer.id) : []
 
   const profileWhere: Prisma.ProviderProfileWhereInput = {
-    verificationStatus: 'VERIFIED',
     profileImage: { not: null }, // never list a profile without a photo
     // Anonymous viewers only see PUBLIC profiles; verified signed-in adults also see MEMBERS_ONLY.
     visibility: viewer && (viewer.ageVerificationStatus === 'VERIFIED' || viewer.role === 'ADMIN') ? { in: ['PUBLIC', 'MEMBERS_ONLY'] } : 'PUBLIC',
@@ -151,7 +150,7 @@ async function loadVisibleProvider(username: string, viewer: Express.Request['us
   const isSelf = viewer?.id === user.id
   const isAdmin = viewer?.role === 'ADMIN'
   if (!isSelf && !isAdmin) {
-    if (profile.verificationStatus !== 'VERIFIED' || profile.visibility === 'HIDDEN') throw notFound('Profile not found')
+    if (profile.visibility === 'HIDDEN') throw notFound('Profile not found')
     if (profile.visibility === 'MEMBERS_ONLY' && viewer?.ageVerificationStatus !== 'VERIFIED') throw notFound('Profile not found')
     if (viewer && (await isBlockedEitherWay(viewer.id, user.id))) throw notFound('Profile not found')
   }

@@ -61,7 +61,7 @@ messagesRouter.post('/', requireVerifiedAdult, wrap(async (req, res) => {
   if (!other || other.id === u.id) throw notFound('User not found')
   assertNotSample(u, other)
   // Clients may only start conversations with listed providers; providers reply to existing ones or message clients who contacted them.
-  if (u.role === 'CLIENT' && !(other.role === 'PROVIDER' && other.providerProfile?.verificationStatus === 'VERIFIED' && other.providerProfile.visibility !== 'HIDDEN'))
+  if (u.role === 'CLIENT' && !(other.role === 'PROVIDER' && !!other.providerProfile && other.providerProfile.visibility !== 'HIDDEN'))
     throw notFound('User not found')
   if (u.role === 'PROVIDER') {
     const existing = await prisma.conversation.findUnique({ where: { pairKey: [u.id, other.id].sort().join(':') } })

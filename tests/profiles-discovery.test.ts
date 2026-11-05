@@ -10,7 +10,7 @@ describe('provider profile creation', () => {
     await api().post('/api/me/onboarding').set(h).send({ role: 'PROVIDER', username: 'newprov', displayName: 'New Prov', city: 'Lagos', acceptTerms: true }).expect(201)
     const profile = await api().get('/api/provider/profile').set(h).expect(200)
     expect(profile.body.verificationStatus).toBe('UNSUBMITTED')
-    // not discoverable until verified
+    // listed without review, but only once a photo is added
     const list = await api().get('/api/providers').expect(200)
     expect(list.body.items).toHaveLength(0)
   })
@@ -34,13 +34,17 @@ describe('provider profile creation', () => {
     await api().post('/api/provider/profile/submit').set(auth(p)).expect(409)
   })
 
-  it('goes live only after an administrator approves the verification', async () => {
+  it('is listed before review; approval only adds the Verified badge', async () => {
     const p = await makeProvider({ ageVerificationStatus: 'PENDING' }, { verificationStatus: 'PENDING' })
     const admin = await makeAdmin()
     const req = await prisma.verificationRequest.create({ data: { userId: p.id, type: 'PROVIDER_IDENTITY' } })
-    expect((await api().get('/api/providers')).body.items).toHaveLength(0)
+    const before = (await api().get('/api/providers')).body.items
+    expect(before).toHaveLength(1)
+    expect(before[0].verified).toBe(false)
     await api().post(`/api/admin/verifications/${req.id}/approve`).set(auth(admin)).send({}).expect(200)
-    expect((await api().get('/api/providers')).body.items).toHaveLength(1)
+    const after = (await api().get('/api/providers')).body.items
+    expect(after).toHaveLength(1)
+    expect(after[0].verified).toBe(true)
     expect((await prisma.user.findUniqueOrThrow({ where: { id: p.id } })).ageVerificationStatus).toBe('VERIFIED')
   })
 
@@ -66,20 +70,20 @@ describe('discovery & filtering', () => {
     await makeProvider({ username: 'amara', displayName: 'Amara' }, { city: 'Lagos', area: 'Lekki', availabilityStatus: 'AVAILABLE_NOW' })
     await makeProvider({ username: 'queenb', displayName: 'Queen B' }, { city: 'Abuja', area: 'Maitama', availabilityStatus: 'BY_APPOINTMENT' })
     await makeProvider({ username: 'hidden1' }, { visibility: 'HIDDEN' })
-    await makeProvider({ username: 'unverified1' }, { verificationStatus: 'PENDING' })
+    await makeProvider({ username: 'unverified1' }, { verificationStatus: 'PENDING', city: 'Ibadan', area: 'Bodija', availabilityStatus: 'OFFLINE' })
     await makeProvider({ username: 'suspended1', accountStatus: 'SUSPENDED' })
     await makeProvider({ username: 'members1' }, { visibility: 'MEMBERS_ONLY' })
   })
   const names = (r: any) => r.body.items.map((i: any) => i.username).sort()
 
-  it('lists only verified, active, public providers to anonymous visitors', async () => {
-    expect(names(await api().get('/api/providers'))).toEqual(['amara', 'queenb'])
+  it('lists active, public providers (verified or not) to anonymous visitors', async () => {
+    expect(names(await api().get('/api/providers'))).toEqual(['amara', 'queenb', 'unverified1'])
   })
   it('shows members-only profiles only to verified adults', async () => {
     const verified = await makeClient()
     const unverified = await makeClient({ ageVerificationStatus: 'NOT_STARTED' })
-    expect(names(await api().get('/api/providers').set(auth(verified)))).toEqual(['amara', 'members1', 'queenb'])
-    expect(names(await api().get('/api/providers').set(auth(unverified)))).toEqual(['amara', 'queenb'])
+    expect(names(await api().get('/api/providers').set(auth(verified)))).toEqual(['amara', 'members1', 'queenb', 'unverified1'])
+    expect(names(await api().get('/api/providers').set(auth(unverified)))).toEqual(['amara', 'queenb', 'unverified1'])
     await api().get('/api/providers/members1').expect(404)
     await api().get('/api/providers/members1').set(auth(verified)).expect(200)
   })
@@ -90,8 +94,9 @@ describe('discovery & filtering', () => {
     expect(names(await api().get('/api/providers?q=queen'))).toEqual(['queenb'])
     expect(names(await api().get('/api/providers?q=nomatch'))).toEqual([])
   })
-  it('hides hidden / unverified / suspended profile pages', async () => {
-    for (const u of ['hidden1', 'unverified1', 'suspended1']) await api().get(`/api/providers/${u}`).expect(404)
+  it('hides hidden / suspended profile pages but shows unverified ones', async () => {
+    for (const u of ['hidden1', 'suspended1']) await api().get(`/api/providers/${u}`).expect(404)
+    await api().get('/api/providers/unverified1').expect(200)
   })
   it('supports favourites', async () => {
     const c = await makeClient()

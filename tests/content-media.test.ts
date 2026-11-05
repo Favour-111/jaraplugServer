@@ -37,10 +37,9 @@ describe('content upload validation', () => {
     expect((await upload(p, await png(), { ...base, price: '10' }).expect(400)).body.code).toBe('BAD_PRICE')
     expect((await upload(p, await png(), { ...base, visibility: 'PUBLIC', price: '5000' }).expect(400)).body.code).toBe('BAD_PRICE')
   })
-  it('blocks unverified providers from publishing but allows drafts', async () => {
-    const p = await makeProvider({}, { verificationStatus: 'PENDING' })
-    const r = await upload(p, await png(), base).expect(403)
-    expect(r.body.code).toBe('PROVIDER_NOT_VERIFIED')
+  it('lets unverified providers publish and save drafts', async () => {
+    const p = await makeProvider({}, { verificationStatus: 'UNSUBMITTED' })
+    await upload(p, await png(), base).expect(201)
     await upload(p, await png(), { ...base, publish: 'false', consentConfirmed: 'false' }).expect(201)
   })
   it('only providers can upload', async () => {

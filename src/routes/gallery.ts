@@ -11,8 +11,8 @@ import { blockedIdsFor } from '../services/blocks'
 export const galleryRouter = Router()
 galleryRouter.use(requireAuth, requireRole('CLIENT'))
 
-// Same rule as Discover: only active, verified, non-hidden providers appear.
-const listedProvider = { accountStatus: 'ACTIVE' as const, role: 'PROVIDER' as const, providerProfile: { is: { verificationStatus: 'VERIFIED' as const, visibility: { not: 'HIDDEN' as const } } } }
+// Same rule as Discover: only active, non-hidden providers appear (no review needed to go public).
+const listedProvider = { accountStatus: 'ACTIVE' as const, role: 'PROVIDER' as const, providerProfile: { is: { visibility: { not: 'HIDDEN' as const } } } }
 
 galleryRouter.get('/', wrap(async (req, res) => {
   const u = me(req)
