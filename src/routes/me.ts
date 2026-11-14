@@ -4,6 +4,7 @@ import { prisma } from '../db'
 import { applyReferral } from '../services/referrals'
 import { env } from '../env'
 import { cityField } from '../config/constants'
+import { countryField } from '../config/pricing'
 import { badRequest, conflict, forbidden, wrap } from '../lib/errors'
 import { me, requireAuth, signUploadTicket } from '../auth'
 import { toSelf } from '../lib/serializers'
@@ -49,6 +50,7 @@ const onboardingSchema = z.discriminatedUnion('role', [
     username,
     displayName: z.string().trim().min(2).max(40).optional(),
     city: cityField,
+    country: countryField.optional(),
     acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
     referralCode: z.string().max(20).optional(),
   }),
@@ -57,6 +59,7 @@ const onboardingSchema = z.discriminatedUnion('role', [
     username,
     displayName: z.string().trim().min(2).max(40),
     city: cityField,
+    country: countryField.optional(),
     acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
   }),
 ])
@@ -76,6 +79,7 @@ meRouter.post('/onboarding', wrap(async (req, res) => {
         username: body.username,
         displayName: body.displayName ?? body.username,
         city: body.city,
+        country: body.country ?? null,
         termsAcceptedAt: now,
         privacyAcceptedAt: now,
         onboardedAt: now,
@@ -98,6 +102,7 @@ meRouter.patch('/', wrap(async (req, res) => {
   const body = z.object({
     displayName: z.string().trim().min(2).max(40).optional(),
     city: cityField.optional(),
+    country: countryField.optional(),
   }).parse(req.body)
   const updated = await prisma.user.update({ where: { id: u.id }, data: body })
   res.json(toSelf(updated))
@@ -150,7 +155,7 @@ meRouter.get('/transactions', wrap(async (req, res) => {
   const titles = new Map(contents.map((c) => [c.id, c.title]))
   res.json({
     items: rows.map((r) => ({
-      id: r.id, reference: r.providerReference, amount: r.amount, currency: r.currency, status: r.status,
+      id: r.id, reference: r.providerReference, amount: r.amount, currency: r.currency, credits: r.credits, status: r.status,
       type: r.transactionType, title: r.contentId ? titles.get(r.contentId) ?? null : null, createdAt: r.createdAt, paidAt: r.paidAt,
     })),
   })

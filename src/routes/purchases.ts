@@ -81,5 +81,5 @@ purchasesRouter.get('/verify/:reference', wrap(async (req, res) => {
     prisma.transaction.findUniqueOrThrow({ where: { id: tx.id } }),
     prisma.contentPurchase.findUnique({ where: { transactionId: tx.id } }),
   ])
-  res.json({ reference: fresh.providerReference, type: fresh.transactionType, status: fresh.status, contentId: fresh.contentId, credits: fresh.transactionType === 'CREDIT_TOPUP' ? kobotoCredits(fresh.amount) : null, entitled: purchase?.status === 'COMPLETED' })
+  res.json({ reference: fresh.providerReference, type: fresh.transactionType, status: fresh.status, contentId: fresh.contentId, credits: fresh.transactionType === 'CREDIT_TOPUP' ? fresh.credits ?? kobotoCredits(fresh.amount) : null, entitled: purchase?.status === 'COMPLETED' })
 }))

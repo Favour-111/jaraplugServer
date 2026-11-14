@@ -52,6 +52,7 @@ export function toSelf(u: User, profile?: ProviderProfile | null) {
     accountStatus: u.accountStatus,
     ageVerificationStatus: u.ageVerificationStatus,
     city: u.city,
+    country: u.country,
     preferences: u.preferences,
     onboarded: !!u.onboardedAt,
     isDemo: u.isDemo,

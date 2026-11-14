@@ -167,6 +167,8 @@ model User {
   creditBalance         Int                   @default(0)
   referralCode          String?               @unique
   city                  String?
+  // ISO 3166-1 alpha-2 ("NG", "GB"…). Decides the currency credits are sold in; see src/config/pricing.ts.
+  country               String?
   preferences           Json?
   avatarKey             String?
   termsAcceptedAt       DateTime?
@@ -379,6 +381,8 @@ model Transaction {
   checkoutUrl       String?
   amount            Int
   currency          String            @default("NGN")
+  // Credits bought by a CREDIT_TOPUP (amount is then in `currency` minor units, not necessarily kobo).
+  credits           Int?
   platformFee       Int               @default(0)
   processingFee     Int               @default(0)
   netAmount         Int               @default(0)

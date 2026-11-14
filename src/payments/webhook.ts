@@ -50,8 +50,8 @@ export async function applyPaymentEvent(event: PaymentEvent): Promise<WebhookRes
       }
 
       if (tx.transactionType === 'CREDIT_TOPUP') {
-        const credits = kobotoCredits(tx.amount)
-        if (credits === null) {
+        const credits = tx.credits ?? kobotoCredits(tx.amount)
+        if (!credits) {
           await db.transaction.update({ where: { id: tx.id }, data: { status: 'FAILED' } })
           return { status: 'ignored' as const, reference: tx.providerReference }
         }
@@ -103,7 +103,7 @@ export async function notifyPurchase(reference: string) {
 async function afterSuccess(reference: string) {
   const tx = await prisma.transaction.findUnique({ where: { providerReference: reference } })
   if (tx?.transactionType === 'CREDIT_TOPUP') {
-    const credits = kobotoCredits(tx.amount)
+    const credits = tx.credits ?? kobotoCredits(tx.amount)
     await notify(tx.userId, 'PURCHASE_COMPLETED', 'Credits added', `${credits} credit${credits === 1 ? '' : 's'} added to your wallet.`, '/app/credits').catch(() => {})
     return
   }

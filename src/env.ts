@@ -38,6 +38,11 @@ const schema = z.object({
   PAYSTACK_SECRET_KEY: z.string().optional(),
   // One in-app credit costs this many kobo (10_000 = ₦100). Content prices must be whole multiples of it.
   CREDIT_PRICE_KOBO: z.coerce.number().int().positive().default(10_000),
+  // Currencies switched on for your Paystack business (Dashboard → Settings → Currencies). Buyers abroad are charged in
+  // their local one when it is listed here, otherwise in USD, otherwise NGN. See config/pricing.ts.
+  PAYSTACK_CURRENCIES: z.string().default('NGN,USD'),
+  // Optional per-currency credit prices in minor units, e.g. "USD:10,GHS:100,KES:1000,ZAR:125".
+  CREDIT_PRICES: z.string().optional(),
   PLATFORM_COMMISSION_BPS: z.coerce.number().int().min(0).max(10000).default(2000),
   PAYOUT_HOLD_DAYS: z.coerce.number().int().min(0).default(0),
   MIN_PAYOUT_KOBO: z.coerce.number().int().min(0).default(100000),

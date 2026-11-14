@@ -239,7 +239,7 @@ adminRouter.get('/transactions', wrap(async (_req, res) => {
     orderBy: { createdAt: 'desc' }, take: 200,
     include: { user: { select: { username: true } }, payee: { select: { username: true } } },
   })
-  res.json({ items: rows.map((t) => ({ id: t.id, reference: t.providerReference, buyer: t.user.username, provider: t.payee?.username ?? null, amount: t.amount, platformFee: t.platformFee, processingFee: t.processingFee, netAmount: t.netAmount, status: t.status, createdAt: t.createdAt, paidAt: t.paidAt })) })
+  res.json({ items: rows.map((t) => ({ id: t.id, reference: t.providerReference, buyer: t.user.username, provider: t.payee?.username ?? null, amount: t.amount, currency: t.currency, platformFee: t.platformFee, processingFee: t.processingFee, netAmount: t.netAmount, status: t.status, createdAt: t.createdAt, paidAt: t.paidAt })) })
 }))
 
 adminRouter.post('/transactions/:id/refund', wrap(async (req, res) => {
