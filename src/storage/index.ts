@@ -12,6 +12,10 @@ export interface Storage {
   putBuffer(key: string, data: Buffer, contentType: string): Promise<void>
   delete(key: string): Promise<void>
   signedUrl(key: string, ttlSeconds?: number): Promise<string>
+  /** Reads a (small) object back, e.g. a thumbnail to derive a blurred copy from. */
+  getBuffer(key: string): Promise<Buffer>
+  /** Copies an object to a local file (for re-processing large media such as videos). */
+  download(key: string, localPath: string): Promise<void>
 }
 
 const b64 = (s: string | Buffer) => Buffer.from(s).toString('base64url')
@@ -56,6 +60,12 @@ class LocalStorage implements Storage {
   async delete(key: string) {
     await fs.promises.rm(resolveLocalPath(key), { force: true })
   }
+  async getBuffer(key: string) {
+    return fs.promises.readFile(resolveLocalPath(key))
+  }
+  async download(key: string, localPath: string) {
+    await fs.promises.copyFile(resolveLocalPath(key), localPath)
+  }
   async signedUrl(key: string, ttl = env.MEDIA_URL_TTL_SECONDS) {
     const payload = b64(JSON.stringify({ k: key, e: Math.floor(Date.now() / 1000) + ttl }))
     return `${env.API_BASE_URL}/api/media/f/${payload}.${hmac(payload)}`
@@ -85,6 +95,19 @@ class S3Storage implements Storage {
   async delete(key: string) {
     const { DeleteObjectCommand } = await import('@aws-sdk/client-s3')
     await (await this.clientPromise).send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
+  }
+  private async body(key: string) {
+    const { GetObjectCommand } = await import('@aws-sdk/client-s3')
+    const r = await (await this.clientPromise).send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
+    if (!r.Body) throw new Error(`S3 object ${key} has no body`)
+    return r.Body as NodeJS.ReadableStream & { transformToByteArray(): Promise<Uint8Array> }
+  }
+  async getBuffer(key: string) {
+    return Buffer.from(await (await this.body(key)).transformToByteArray())
+  }
+  async download(key: string, localPath: string) {
+    const { pipeline } = await import('node:stream/promises')
+    await pipeline(await this.body(key), fs.createWriteStream(localPath))
   }
   async signedUrl(key: string, ttl = env.MEDIA_URL_TTL_SECONDS) {
     const { GetObjectCommand } = await import('@aws-sdk/client-s3')

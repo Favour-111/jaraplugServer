@@ -7,7 +7,7 @@ import { prisma } from '../db'
 import { MAX_PAID_PRICE_KOBO, MIN_PAID_PRICE_KOBO } from '../config/constants'
 import { badRequest, conflict, forbidden, notFound, wrap } from '../lib/errors'
 import { me, optionalAuth, requireAuth, requireRole } from '../auth'
-import { contentUpload, processImage, rm, validateUpload } from '../lib/upload'
+import { blurImage, contentUpload, processImage, rm, validateUpload } from '../lib/upload'
 import { faststart, probeVideo } from '../lib/video'
 import { storage } from '../storage'
 import { canAccessContent, serializeContent } from '../services/content'
@@ -17,8 +17,8 @@ import { env } from '../env'
 
 export const contentRouter = Router()
 
-const placeholderThumb = (blur: boolean) =>
-  sharp({ create: { width: 480, height: 640, channels: 3, background: '#1a0509' } }).jpeg({ quality: 60 }).toBuffer().then((b) => (blur ? b : b))
+const placeholderThumb = () =>
+  sharp({ create: { width: 480, height: 640, channels: 3, background: '#1a0509' } }).jpeg({ quality: 60 }).toBuffer()
 
 const uploadFields = z.object({
   title: z.string().trim().min(2, 'Title is required').max(80),
@@ -77,14 +77,14 @@ contentRouter.post('/', requireAuth, requireRole('PROVIDER'), contentUpload.sing
     const id = crypto.randomUUID()
     const storageKey = `content/${u.id}/${id}.${sniffed.ext}`
     const thumbKey = `thumbs/${u.id}/${id}.jpg`
-    const blur = f.visibility === 'PAID'
+    const blurKey = `thumbs/${u.id}/${id}.blur.jpg`
     let thumb: Buffer
     let durationSeconds: number | null = null
     let sizeBytes = req.file!.size
     let main: { path: string; mime: string } = { path: req.file!.path, mime: sniffed.mime }
 
     if (sniffed.kind === 'IMAGE') {
-      const processed = await processImage(req.file!.path, { blurThumb: blur })
+      const processed = await processImage(req.file!.path)
       thumb = processed.thumb
       // Re-encoded copy: strips EXIF/GPS metadata from everything we store.
       await storage.putBuffer(storageKey.replace(/\.\w+$/, '.jpg'), processed.main, 'image/jpeg')
@@ -92,21 +92,21 @@ contentRouter.post('/', requireAuth, requireRole('PROVIDER'), contentUpload.sing
     } else {
       const probe = await probeVideo(req.file!.path)
       durationSeconds = probe.durationSeconds
-      if (probe.poster) {
-        const base = sharp(probe.poster).resize({ width: 480 })
-        thumb = await (blur ? base.resize({ width: 24 }).blur(1).resize({ width: 480, kernel: 'cubic' }) : base).jpeg({ quality: 70 }).toBuffer()
-      } else thumb = await placeholderThumb(blur)
+      thumb = probe.poster ? await sharp(probe.poster).resize({ width: 480 }).jpeg({ quality: 70 }).toBuffer() : await placeholderThumb()
       fast = await faststart(req.file!.path, sniffed.ext)
       if (fast) sizeBytes = (await fs.promises.stat(fast)).size
       await storage.putFile(storageKey, fast ?? req.file!.path, sniffed.mime)
     }
+    // Two thumbnails: the clear one only reaches viewers who may see the item; everyone else gets the blurred one.
+    // Both exist for every item, so changing visibility later (e.g. public → paid) never exposes a clear preview.
     await storage.putBuffer(thumbKey, thumb, 'image/jpeg')
+    await storage.putBuffer(blurKey, await blurImage(thumb), 'image/jpeg')
 
     const finalKey = sniffed.kind === 'IMAGE' ? storageKey.replace(/\.\w+$/, '.jpg') : storageKey
     const content = await prisma.mediaContent.create({
       data: {
         id, providerId: u.id, title: f.title, description: f.description, mediaType: sniffed.kind, mimeType: main.mime,
-        sizeBytes, storageKey: finalKey, thumbnailKey: thumbKey, visibility: f.visibility, price: priceKobo,
+        sizeBytes, storageKey: finalKey, thumbnailKey: thumbKey, blurThumbKey: blurKey, visibility: f.visibility, price: priceKobo,
         status: publish ? 'PUBLISHED' : 'DRAFT', moderationStatus: 'APPROVED', consentConfirmed: consent, durationSeconds,
       },
     })
@@ -159,7 +159,7 @@ contentRouter.delete('/:id', requireAuth, requireRole('PROVIDER'), wrap(async (r
   if (!content || content.providerId !== u.id) throw notFound('Content not found')
   if (content._count.purchases > 0) throw conflict('This item has been purchased and cannot be deleted. Unpublish it instead.', 'HAS_PURCHASES')
   await prisma.mediaContent.delete({ where: { id: content.id } })
-  await Promise.all([storage.delete(content.storageKey), content.thumbnailKey ? storage.delete(content.thumbnailKey) : null].map((p) => p?.catch(() => {})))
+  await Promise.all([storage.delete(content.storageKey), content.thumbnailKey ? storage.delete(content.thumbnailKey) : null, content.blurThumbKey ? storage.delete(content.blurThumbKey) : null].map((p) => p?.catch(() => {})))
   res.json({ ok: true })
 }))
 

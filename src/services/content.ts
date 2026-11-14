@@ -1,6 +1,7 @@
 import type { MediaContent, User } from '@prisma/client'
 import { prisma } from '../db'
 import { storage } from '../storage'
+import { blurImage } from '../lib/upload'
 import { isBlockedEitherWay } from './blocks'
 
 export type Viewer = Pick<User, 'id' | 'role' | 'ageVerificationStatus' | 'accountStatus'> | null
@@ -36,10 +37,42 @@ export async function canAccessContent(viewer: Viewer, content: MediaContent): P
   }
 }
 
+const pendingBlur = new Map<string, Promise<string | null>>()
+
+/**
+ * Key of the server-blurred thumbnail, creating it on first use for items uploaded before blurred copies existed.
+ * Returns null when no blurred copy can be made; the caller then shows NO thumbnail rather than the clear one.
+ */
+export function blurredThumbKey(c: Pick<MediaContent, 'id' | 'thumbnailKey' | 'blurThumbKey'>): Promise<string | null> {
+  if (c.blurThumbKey) return Promise.resolve(c.blurThumbKey)
+  if (!c.thumbnailKey) return Promise.resolve(null)
+  const source = c.thumbnailKey
+  let p = pendingBlur.get(c.id)
+  if (!p) {
+    p = (async () => {
+      try {
+        const key = source.replace(/(\.\w+)?$/, '.blur.jpg')
+        await storage.putBuffer(key, await blurImage(await storage.getBuffer(source)), 'image/jpeg')
+        await prisma.mediaContent.update({ where: { id: c.id }, data: { blurThumbKey: key } })
+        return key
+      } catch (e) {
+        console.warn(`Could not create a blurred thumbnail for content ${c.id}:`, e instanceof Error ? e.message : e)
+        return null
+      } finally {
+        pendingBlur.delete(c.id)
+      }
+    })()
+    pendingBlur.set(c.id, p)
+  }
+  return p
+}
+
 /** Public-safe card for a content item. `url` is only present when the viewer is entitled. */
 export async function serializeContent(content: MediaContent, viewer: Viewer, opts: { withUrl?: boolean } = {}) {
   const accessible = await canAccessContent(viewer, content)
   const isOwner = viewer?.id === content.providerId
+  // Locked items (paid, members-only…) only ever get the blurred thumbnail, photos and videos alike.
+  const thumbKey = accessible ? content.thumbnailKey : await blurredThumbKey(content)
   return {
     id: content.id,
     providerId: content.providerId,
@@ -54,8 +87,8 @@ export async function serializeContent(content: MediaContent, viewer: Viewer, op
     moderationNote: isOwner ? content.moderationNote : undefined,
     createdAt: content.createdAt,
     locked: !accessible,
-    // Thumbnails of paid items are server-side pre-blurred derivatives — never CSS-blurred originals.
-    thumbnailUrl: content.thumbnailKey ? await storage.signedUrl(content.thumbnailKey, 3600) : null,
+    // Locked thumbnails are server-side blurred derivatives — never CSS-blurred originals.
+    thumbnailUrl: thumbKey ? await storage.signedUrl(thumbKey, 3600) : null,
     url: accessible && opts.withUrl !== false ? await storage.signedUrl(content.storageKey) : null,
   }
 }

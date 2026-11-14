@@ -3,7 +3,7 @@ import { prisma } from '../db'
 import { clientOrigins, isDev } from '../env'
 import { badRequest } from '../lib/errors'
 import { paymentProvider } from './provider'
-import { creditPriceIn } from '../config/pricing'
+import { amountFor, creditPriceIn } from '../config/pricing'
 
 /** Paystack rejects missing and reserved-TLD (.invalid) addresses, which seeded/dev accounts have. */
 export const billingEmail = (u: Pick<User, 'id' | 'email'>) =>
@@ -28,7 +28,7 @@ export async function startCheckout(tx: PendingTx, user: Pick<User, 'id' | 'emai
       // Paystack still accepts international cards for NGN payments; the card issuer does the conversion.
       if (tx.currency === 'NGN' || !tx.credits) throw e
       console.warn(`Paystack refused ${tx.currency} for ${tx.providerReference}, retrying in NGN:`, e instanceof Error ? e.message : e)
-      amount = tx.credits * creditPriceIn('NGN')
+      amount = amountFor(tx.credits, await creditPriceIn('NGN'))
       currency = 'NGN'
       ;({ checkoutUrl } = await create({ ...tx, amount, currency }))
     }

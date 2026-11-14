@@ -50,11 +50,23 @@ export async function validateUpload(file: Express.Multer.File | undefined, allo
 }
 
 /** Re-encodes an image (strips EXIF/GPS metadata) and returns main + thumbnail buffers. */
-export async function processImage(filePath: string | Buffer, opts: { blurThumb?: boolean; maxWidth?: number } = {}) {
+/**
+ * Heavy blur baked into the pixels: shrink to 24px wide (destroying detail), blur, then scale back up.
+ * The result cannot be "un-blurred" because the detail is gone, unlike a CSS blur on the real image.
+ */
+export async function blurImage(input: Buffer) {
+  // Two separate pipelines: sharp only honours the LAST resize() in a chain, so shrink-then-enlarge in one chain
+  // silently skips the shrink and leaves the picture almost sharp.
+  const { data, info } = await sharp(input).rotate().resize({ width: 24 }).raw().toBuffer({ resolveWithObject: true })
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
+    .resize({ width: 480, kernel: 'cubic' }).blur(6).modulate({ brightness: 0.85 }).jpeg({ quality: 70 }).toBuffer()
+}
+
+export async function processImage(filePath: string | Buffer, opts: { maxWidth?: number } = {}) {
   const main = await sharp(filePath).rotate().resize({ width: opts.maxWidth ?? 1600, withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer()
   const thumbBase = sharp(filePath).rotate().resize({ width: 480, withoutEnlargement: true })
-  // Blur is baked into the pixels server-side. The original is never exposed to unentitled viewers.
-  const thumb = await (opts.blurThumb ? thumbBase.resize({ width: 24 }).blur(1).resize({ width: 480, kernel: 'cubic' }) : thumbBase).jpeg({ quality: 70 }).toBuffer()
+  // Clear thumbnail. Locked viewers get blurImage()'s copy instead (see services/content.ts blurredThumbKey).
+  const thumb = await thumbBase.jpeg({ quality: 70 }).toBuffer()
   return { main, thumb }
 }
 

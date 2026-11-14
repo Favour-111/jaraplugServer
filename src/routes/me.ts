@@ -190,7 +190,7 @@ meRouter.delete('/', wrap(async (req, res) => {
   const content = await prisma.mediaContent.findMany({ where: { providerId: u.id }, include: { _count: { select: { purchases: true } } } })
   const profile = await prisma.providerProfile.findUnique({ where: { userId: u.id } })
   const authId = u.authProviderId
-  const filesToDelete = [u.avatarKey, profile?.profileImage, ...content.flatMap((c) => [c.storageKey, c.thumbnailKey])].filter(Boolean) as string[]
+  const filesToDelete = [u.avatarKey, profile?.profileImage, ...content.flatMap((c) => [c.storageKey, c.thumbnailKey, c.blurThumbKey])].filter(Boolean) as string[]
   const attachments = await prisma.message.findMany({ where: { senderId: u.id, attachmentKey: { not: null } }, select: { attachmentKey: true } })
   filesToDelete.push(...attachments.map((a) => a.attachmentKey!))
 
@@ -198,7 +198,7 @@ meRouter.delete('/', wrap(async (req, res) => {
     await db.booking.updateMany({ where: { OR: [{ clientId: u.id }, { providerId: u.id }], status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'CANCELLED', declineReason: 'Account deleted' } })
     // Content with purchases is kept as a removed tombstone so financial records stay consistent; the files are erased.
     for (const c of content) {
-      if (c._count.purchases > 0) await db.mediaContent.update({ where: { id: c.id }, data: { status: 'DRAFT', moderationStatus: 'REMOVED', storageKey: 'deleted', thumbnailKey: null, title: 'Removed content', description: '' } })
+      if (c._count.purchases > 0) await db.mediaContent.update({ where: { id: c.id }, data: { status: 'DRAFT', moderationStatus: 'REMOVED', storageKey: 'deleted', thumbnailKey: null, blurThumbKey: null, title: 'Removed content', description: '' } })
       else await db.mediaContent.delete({ where: { id: c.id } })
     }
     await db.message.updateMany({ where: { senderId: u.id }, data: { body: '', attachmentKey: null } })

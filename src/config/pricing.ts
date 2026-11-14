@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { env } from '../env'
 import { CREDIT_PACKAGES, MAX_TOPUP_CREDITS, MIN_TOPUP_CREDITS } from './constants'
+import { ngnRates } from '../services/fx'
 
 /**
  * Location-based pricing for credit top-ups.
@@ -10,6 +11,9 @@ import { CREDIT_PACKAGES, MAX_TOPUP_CREDITS, MIN_TOPUP_CREDITS } from './constan
  * South Africa in ZAR, and everyone else outside Nigeria in USD, as long as that currency is switched on in
  * PAYSTACK_CURRENCIES (Paystack only charges in currencies enabled on your merchant account).
  * Amounts are in the currency's minor unit (kobo, cents, pesewas…), which is what Paystack expects.
+ *
+ * Foreign prices are the naira price converted at today's exchange rate (services/fx.ts), plus FX_MARKUP_PERCENT
+ * (default 0) if you want to cover conversion/international-card fees. CREDIT_PRICES pins a fixed price instead.
  */
 
 export type Currency = 'NGN' | 'USD' | 'GHS' | 'KES' | 'ZAR'
@@ -18,14 +22,6 @@ const CURRENCIES = ['NGN', 'USD', 'GHS', 'KES', 'ZAR'] as const
 /** Countries that pay in their own currency on Paystack. Everyone else pays in USD. */
 const LOCAL_CURRENCY: Record<string, Currency> = { NG: 'NGN', GH: 'GHS', KE: 'KES', ZA: 'ZAR' }
 
-/** Default price of one credit, in minor units. Override with CREDIT_PRICES, e.g. "USD:10,GHS:100". */
-const DEFAULT_CREDIT_PRICE: Record<Currency, number> = {
-  NGN: env.CREDIT_PRICE_KOBO, // ₦100
-  USD: 10, // $0.10
-  GHS: 100, // GH₵1.00
-  KES: 1000, // KSh10
-  ZAR: 125, // R1.25
-}
 
 /** Paystack's smallest accepted charge per currency (minor units). Small top-ups are raised to meet it. */
 const MIN_CHARGE: Record<Currency, number> = { NGN: 5_000, USD: 200, GHS: 10, KES: 300, ZAR: 100 }
@@ -40,7 +36,23 @@ const overrides = Object.fromEntries(
     .map(([c, v]) => [c.toUpperCase(), Number(v)]).filter(([, v]) => Number.isInteger(v) && (v as number) > 0),
 ) as Partial<Record<Currency, number>>
 
-export const creditPriceIn = (currency: Currency) => overrides[currency] ?? DEFAULT_CREDIT_PRICE[currency]
+/**
+ * Price of one credit in `currency` minor units. May be fractional (e.g. 6.9 US cents); the total charged is
+ * rounded UP to a whole minor unit by amountFor(), so a buyer never pays less than the naira price.
+ */
+export async function creditPriceIn(currency: Currency) {
+  if (currency === 'NGN') return overrides.NGN ?? env.CREDIT_PRICE_KOBO
+  if (overrides[currency]) return overrides[currency]!
+  const { rates } = await ngnRates()
+  const rate = rates[currency]
+  if (!rate) throw new Error(`No exchange rate for ${currency}`)
+  // kobo → naira → foreign major unit → foreign minor unit (all five currencies use 2 decimals).
+  const price = (env.CREDIT_PRICE_KOBO / 100) * rate * 100 * (1 + env.FX_MARKUP_PERCENT / 100)
+  return Math.round(price * 1e6) / 1e6 // fixed precision so the app and the server compute identical totals
+}
+
+/** What N credits cost, in whole minor units. The client uses the same formula to display prices. */
+export const amountFor = (credits: number, creditPrice: number) => Math.ceil(Math.round(credits * creditPrice * 1e6) / 1e6)
 
 const regionNames = new Intl.DisplayNames(['en'], { type: 'region' })
 /** ISO 3166-1 alpha-2 code ("NG", "GB", "US"…) for a real country. */
@@ -63,14 +75,23 @@ export function currencyFor(country: string | null | undefined): Currency {
 }
 
 /** Everything the Credits page needs to show and charge prices for a buyer. */
-export function pricingFor(country: string | null | undefined) {
-  const currency = currencyFor(country)
-  const creditPrice = creditPriceIn(currency)
+export async function pricingFor(country: string | null | undefined) {
+  let currency = currencyFor(country)
+  let creditPrice: number
+  try {
+    creditPrice = await creditPriceIn(currency)
+  } catch {
+    currency = 'NGN' // no usable rate: sell in naira rather than at a wrong price
+    creditPrice = await creditPriceIn('NGN')
+  }
   const minTopup = Math.max(MIN_TOPUP_CREDITS, Math.ceil(MIN_CHARGE[currency] / creditPrice))
+  const fx = currency === 'NGN' || overrides[currency] ? null : await ngnRates()
   return {
     country: country ?? null,
     currency,
     creditPrice,
+    /** When the exchange rate used was published (null for NGN / fixed prices). */
+    rateUpdatedAt: fx?.updatedAt ?? null,
     minTopup,
     maxTopup: MAX_TOPUP_CREDITS,
     packages: CREDIT_PACKAGES.filter((n) => n >= minTopup),

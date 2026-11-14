@@ -6,7 +6,7 @@ import { env } from '../env'
 import { wrap } from '../lib/errors'
 import { me, requireAuth, requireVerifiedAdult } from '../auth'
 import { MAX_TOPUP_CREDITS } from '../config/constants'
-import { countryName, pricingFor } from '../config/pricing'
+import { amountFor, countryName, pricingFor } from '../config/pricing'
 import { paymentProvider } from '../payments/provider'
 import { startCheckout } from '../payments/checkout'
 
@@ -22,7 +22,7 @@ creditsRouter.get('/', wrap(async (req, res) => {
   ])
   const contentIds = entries.map((e) => e.contentId).filter((x): x is string => !!x)
   const titles = new Map((await prisma.mediaContent.findMany({ where: { id: { in: contentIds } }, select: { id: true, title: true } })).map((c) => [c.id, c.title]))
-  const pricing = pricingFor(fresh.country)
+  const pricing = await pricingFor(fresh.country)
   res.json({
     balance: fresh.creditBalance,
     creditPriceKobo: env.CREDIT_PRICE_KOBO,
@@ -37,7 +37,7 @@ creditsRouter.get('/', wrap(async (req, res) => {
 creditsRouter.post('/topup', requireVerifiedAdult, wrap(async (req, res) => {
   const u = me(req)
   const fresh = await prisma.user.findUniqueOrThrow({ where: { id: u.id }, select: { country: true } })
-  const { currency, creditPrice, minTopup } = pricingFor(fresh.country)
+  const { currency, creditPrice, minTopup } = await pricingFor(fresh.country)
   const { credits } = z.object({ credits: z.number().int().min(minTopup, `The smallest top-up is ${minTopup} credits`).max(MAX_TOPUP_CREDITS) }).parse(req.body)
   const tx = await prisma.transaction.create({
     data: {
@@ -45,7 +45,7 @@ creditsRouter.post('/topup', requireVerifiedAdult, wrap(async (req, res) => {
       providerReference: `jp_${crypto.randomBytes(12).toString('hex')}`,
       // The price comes from OUR configuration, never from the request.
       // The currency follows the buyer's saved country.
-      amount: credits * creditPrice, currency, credits, status: 'PENDING',
+      amount: amountFor(credits, creditPrice), currency, credits, status: 'PENDING',
     },
   })
   const checkoutUrl = await startCheckout(tx, u)

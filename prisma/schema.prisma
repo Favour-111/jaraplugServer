@@ -246,6 +246,8 @@ model MediaContent {
   sizeBytes        Int
   storageKey       String
   thumbnailKey     String?
+  // Server-blurred copy of the thumbnail, shown to everyone who has not unlocked the item.
+  blurThumbKey     String?
   visibility       ContentVisibility
   price            Int               @default(0)
   status           ContentStatus     @default(DRAFT)
